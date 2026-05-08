@@ -1,0 +1,289 @@
+---
+title: "Laboratorio 9 - Redes Neuronales Artificiales"
+author: "Bryan Martínez, Adriana Palacios, y Nery Molina"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(ggplot2)
+library(neuralnet)
+library(caret)
+library(knitr)
+
+# PREPROCESAMIENTO ESTÁNDAR
+vars_eliminar <- c(
+  "id", "listing_url", "scrape_id", "picture_url",
+  "host_id", "host_url", "host_thumbnail_url", "host_picture_url",
+  "name", "description", "neighborhood_overview", "host_about",
+  "host_name", "host_location", "amenities", "host_verifications",
+  "source", "last_scraped", "calendar_last_scraped", "calendar_updated",
+  "host_since", "first_review", "last_review",
+  "bathrooms_text",
+  "host_total_listings_count",
+  "neighbourhood",
+  "minimum_nights_avg_ntm",
+  "maximum_nights_avg_ntm",
+  "number_of_reviews_ltm",
+  "number_of_reviews_l30d",
+  "number_of_reviews_ly",
+  "calculated_host_listings_count_entire_homes",
+  "calculated_host_listings_count_private_rooms",
+  "calculated_host_listings_count_shared_rooms",
+  "estimated_revenue_l365d",
+  "host_has_profile_pic", "neighbourhood_group_cleansed"
+)
+
+load("listings.RData")
+listings$price <- as.numeric(gsub("[$,]", "", listings$price))
+listings_clean <- listings[, !(names(listings) %in% vars_eliminar)]
+listings_model <- listings_clean[!is.na(listings_clean$price), ]
+
+set.seed(42)
+trainIndex <- sample(seq_len(nrow(listings_model)), size = floor(0.7 * nrow(listings_model)))
+train <- listings_model[ trainIndex, ]
+test  <- listings_model[-trainIndex, ]
+
+train_num <- na.omit(train[, sapply(train, is.numeric)])
+test_num  <- test[, names(train_num)]
+test_num  <- na.omit(test_num)
+
+# Clasificación
+q33 <- as.numeric(quantile(train_num$price, probs = 0.33, na.rm = TRUE))
+q67 <- as.numeric(quantile(train_num$price, probs = 0.67, na.rm = TRUE))
+
+train_clf <- train_num %>%
+  mutate(price_cat = cut(price, breaks = c(-Inf, q33, q67, Inf),
+                         labels = c("Economica", "Intermedia", "Cara"),
+                         right = TRUE, ordered_result = TRUE))
+
+test_clf <- test_num %>%
+  mutate(price_cat = cut(price, breaks = c(-Inf, q33, q67, Inf),
+                         labels = c("Economica", "Intermedia", "Cara"),
+                         right = TRUE, ordered_result = TRUE))
+
+train_tree_clf <- train_clf %>% select(-price)
+test_tree_clf  <- test_clf %>% select(-price)
+
+# FUNCIONES AUXILIARES
+calc_rmse <- function(obs, pred) sqrt(mean((obs - pred)^2, na.rm = TRUE))
+calc_mae  <- function(obs, pred) mean(abs(obs - pred), na.rm = TRUE)
+calc_r2   <- function(obs, pred) {
+  ss_res <- sum((obs - pred)^2, na.rm = TRUE)
+  ss_tot <- sum((obs - mean(obs, na.rm = TRUE))^2, na.rm = TRUE)
+  1 - ss_res / ss_tot
+}
+calc_acc <- function(real, pred) mean(as.character(real) == as.character(pred))
+
+calc_reg_row <- function(nombre, real_train, pred_train, real_test, pred_test) {
+  data.frame(
+    Modelo = nombre,
+    RMSE_Train = calc_rmse(real_train, pred_train),
+    MAE_Train = calc_mae(real_train, pred_train),
+    R2_Train = calc_r2(real_train, pred_train),
+    RMSE_Test = calc_rmse(real_test, pred_test),
+    MAE_Test = calc_mae(real_test, pred_test),
+    R2_Test = calc_r2(real_test, pred_test)
+  )
+}
+
+diagnostico_clf <- function(acc_train, acc_test, umbral = 0.10) {
+  ifelse(acc_train - acc_test > umbral, "Sobreajuste",
+         ifelse(acc_test < 0.55, "Desajuste", "Adecuado"))
+}
+
+diagnostico_reg <- function(rmse_train, rmse_test, r2_train, r2_test, umbral = 0.20) {
+  brecha <- (rmse_test - rmse_train) / pmax(rmse_train, 1)
+  ifelse(brecha > umbral, "Sobreajuste",
+         ifelse(r2_test < 0.20, "Desajuste", "Adecuado"))
+}
+
+# NORMALIZACIÓN MIN-MAX PARA RNA
+# Los parámetros de normalización se calculan únicamente desde el conjunto de entrenamiento
+# y se aplican tanto a entrenamiento como a prueba para evitar data leakage.
+
+# Clasificación: features desde train_tree_clf (sin price_cat)
+features_clf <- train_tree_clf %>% select(-price_cat)
+rna_clf_min <- sapply(features_clf, min, na.rm = TRUE)
+rna_clf_max <- sapply(features_clf, max, na.rm = TRUE)
+
+minmax_col <- function(x, mn, mx) ifelse(mx == mn, 0, (x - mn) / (mx - mn))
+
+# Conjunto de entrenamiento normalizado para clasificación
+train_rna_features <- as.data.frame(
+  mapply(minmax_col, features_clf, rna_clf_min, rna_clf_max)
+)
+train_rna_clf <- train_rna_features
+train_rna_clf$Economica  <- as.integer(train_tree_clf$price_cat == "Economica")
+train_rna_clf$Intermedia <- as.integer(train_tree_clf$price_cat == "Intermedia")
+train_rna_clf$Cara       <- as.integer(train_tree_clf$price_cat == "Cara")
+train_rna_clf$price_cat  <- train_tree_clf$price_cat
+
+# Conjunto de prueba normalizado para clasificación
+test_features_clf <- test_tree_clf %>% select(-price_cat)
+test_rna_features <- as.data.frame(
+  mapply(minmax_col, test_features_clf, rna_clf_min, rna_clf_max)
+)
+test_rna_clf <- test_rna_features
+test_rna_clf$Economica  <- as.integer(test_tree_clf$price_cat == "Economica")
+test_rna_clf$Intermedia <- as.integer(test_tree_clf$price_cat == "Intermedia")
+test_rna_clf$Cara       <- as.integer(test_tree_clf$price_cat == "Cara")
+test_rna_clf$price_cat  <- test_tree_clf$price_cat
+
+# Regresión: normalizar train_num completo (incluye price como salida)
+rna_reg_min <- sapply(train_num, min, na.rm = TRUE)
+rna_reg_max <- sapply(train_num, max, na.rm = TRUE)
+
+train_rna_reg <- as.data.frame(mapply(minmax_col, train_num, rna_reg_min, rna_reg_max))
+test_rna_reg  <- as.data.frame(mapply(minmax_col, test_num,  rna_reg_min, rna_reg_max))
+
+# Fórmulas para neuralnet
+feature_names_clf <- names(features_clf)
+formula_clf <- as.formula(
+  paste("Economica + Intermedia + Cara ~",
+        paste(feature_names_clf, collapse = " + "))
+)
+
+feature_names_reg <- setdiff(names(train_rna_reg), "price")
+formula_reg <- as.formula(
+  paste("price ~", paste(feature_names_reg, collapse = " + "))
+)
+```
+
+## Actividad 1 — Preparación de los Conjuntos de Datos
+
+Para garantizar que los resultados encontrados con este modelo que se va a estar generando sean comparables con todos los anteriores, se busca utilizar los mismos conjuntos de entrenamiento y prueba. Utilizando la misma semilla y una partición de 70% para datos de entrenamiento y 30% para datos de prueba, establecido desde el laboratorio 3. Se definió de esta forma porque es la sugerencia que se dio dentro del curso como recomendación para tratar de tener modelos que no sean sobreajustados ni subajustados.
+Cabe recalcar que, al estar trabajando con redes neuronales, un enfoque en el cual se tiene sensibilidad ante la escala de los valores que se manejan (ya que el aprendizaje se va calculando en base a los gradientes descendentes), diferencias considerables en las magnitudes de las variables pueden afectar directamente a la efectividad del modelo. ya que podría tomar caminos en donde, dadas las magnitudes tan grandes que pueden tener algunas variables, parezca que representa una tasa de cambio mucho más alta, cuando lo único que está ocurriendo es que las unidades con las que se trabajan son mayores para algunas variables.
+Por ello, para trabajar el resto de laboratorios, se aplicó normalización min-max sobre cada una de las variables predictoras, transformando todos los valores a un rango de entre 0 y 1. Además, para evitar que la información del conjunto de entrenamiento se filtrara hacia el conjunto de prueba, se calcularon los rangos (mínimo y máximo) exclusivamente desde el conjunto de entrenamiento, y esos mismos parámetros se aplican al conjunto de prueba.
+Por otro lado, para cuando se llegue a la etapa de trabajar con el modelo para clasificación, se dejaron los mismos umbrales definidos en laboratorios anteriores. En donde:
+- El percentil 33 va a definir las casas económicas.
+- Entre 33 y 67 tenemos a las intermedias.
+- Del percentil 67 para arriba vamos a tener a todas las casas caras.
+
+## Actividad 2 — Variable Respuesta para Clasificación
+
+La variable respuesta seleccionada para los modelos de clasificación es `price_cat`, construida a partir del precio por noche y discretizada en tres categorías: Economica (precio ≤ `r q33` USD), Intermedia (`r q33` < precio ≤ `r q67` USD) y Cara (precio > `r q67` USD). Esta misma variable se utilizó en todos los laboratorios de clasificación anteriores, lo que permite que podamos comparar contra resultados en modelos previos.
+
+En los conjuntos normalizados para RNA (`train_rna_clf` y `test_rna_clf`), la variable respuesta también está representada mediante tres columnas binarias (Economica, Intermedia, Cara). Dado que las redes neuronales necesitan valores numéricos para poder ponderar sus entradas, las variables categóricas requieren transformarse: para cada valor posible que puede tomar la categoría se crea una columna en el conjunto de datos, y a través de ceros y unos se representa su presencia o ausencia en cada observación.
+
+## Actividad 3 — Modelos de RNA para Clasificación
+
+```{r modelos-clasificacion}
+
+```
+
+## Actividad 4 — Predicciones de Clasificación
+
+```{r predicciones-clasificacion}
+# Predicciones de ambos modelos sobre train y test
+# Para neuralnet: compute(modelo, newdata)$net.result -> argmax -> clase predicha
+```
+
+## Actividad 5 — Matrices de Confusión
+
+```{r matrices-confusion-clf}
+# confusionMatrix() o table() para cada modelo
+```
+
+## Actividad 6 — Comparación de Modelos de Clasificación RNA
+
+```{r comparacion-clasificacion}
+# Comparar exactitud, tiempo de procesamiento (system.time) y distribución de errores
+```
+
+## Actividad 7 — Análisis de Sobreajuste en Clasificación
+
+```{r sobreajuste-clasificacion}
+# Comparar exactitud en entrenamiento vs. prueba para ambos modelos
+# Aplicar diagnostico_clf()
+```
+
+## Actividad 8 — Tuneo del Mejor Modelo de Clasificación
+
+```{r tuneo-clasificacion}
+# Ajustar arquitectura y parámetros del mejor modelo de clasificación
+# Evaluar si mejora sin sobreajustarse
+```
+
+## Actividad 9 — Variable Respuesta para Regresión
+
+Para la tarea de regresión, la variable respuesta es el precio por noche (`price`). Los conjuntos `train_rna_reg` y `test_rna_reg` contienen todas las variables numéricas normalizadas al rango [0, 1], incluyendo `price` como salida, ya que como se mencionó previamente, esto es indispensable para evitar que una variable tenga mayor impacto que otra únicamente por su unidad de medida. Las predicciones deberán desnormalizarse al final usando los mismos parámetros de la transformación para obtener las predicciones expresadas en dólares.
+
+## Actividad 10 — Modelos de RNA para Regresión
+
+```{r modelos-regresion}
+# Modelo 1: una capa oculta de 64 neuronas, activación logística, salida lineal (sin activación)
+
+# Modelo 2: dos capas ocultas de 128 y 64 neuronas, activación tanh, salida lineal
+```
+
+## Actividad 11 — Comparación de Modelos de Regresión RNA
+
+```{r comparacion-regresion}
+# Comparar RMSE, MAE y R2 en train y test para ambos modelos de regresión
+# Usar calc_reg_row() para construir tabla de métricas
+```
+
+## Actividad 12 — Análisis de Sobreajuste con Curvas de Aprendizaje
+
+```{r curvas-aprendizaje}
+# Entrenar el mejor modelo de regresión con fracciones crecientes del conjunto de entrenamiento
+# Registrar error en train y validación en cada punto
+# Graficar curva de aprendizaje con ggplot2
+```
+
+## Actividad 13 — Tuneo del Mejor Modelo de Regresión
+
+```{r tuneo-regresion}
+# Ajustar arquitectura y parámetros del mejor modelo de regresión
+# Evaluar si mejora sin sobreajustarse
+```
+
+## Actividad 14 — RNA vs. Algoritmos Anteriores: Comparación en Regresión
+
+```{r comparacion-global-regresion}
+# Tabla comparativa: Árbol de regresión, Random Forest, Naive Bayes, KNN,
+# Regresión Lineal, SVR, RNA (mejor modelo)
+# Incluir métricas y tiempo de procesamiento
+```
+
+## Actividad 15 — RNA vs. Algoritmos Anteriores: Comparación en Clasificación
+
+```{r comparacion-global-clasificacion}
+# Tabla comparativa: Árbol de decisión, Random Forest, Naive Bayes, KNN,
+# Regresión Logística, SVM, RNA (mejor modelo)
+# Exactitud en test como métrica principal
+```
+
+## Actividad 16 — Mejor Modelo de Regresión: Comparación Final
+
+```{r comparacion-final-regresion}
+# Comparación detallada del mejor modelo de regresión con todos los algoritmos anteriores
+# Análisis de eficiencia (tiempo de procesamiento vs. ganancia en desempeño)
+```
+
+## Actividad 17 — Conclusiones y Tabla Resumen
+
+```{r tabla-resumen-final}
+# Tabla unificada con métricas de todos los modelos (clasificación y regresión)
+# Selección del mejor algoritmo para cada tarea
+```
+
+## Actividad 18 — Análisis Global de Sobreajuste
+
+```{r sobreajuste-global}
+# Comparar brecha train-test de todos los modelos vistos en el curso
+# Considerar el sobreajuste como criterio adicional para selección del mejor modelo
+```
+
+## Actividad 19 — Informe General de la Consultoría
+
+```{r informe-general, eval=FALSE}
+# Informe consolidado desde análisis exploratorio (Lab 3) hasta RNA (Lab 9)
+# Formato formal para presentación a directivos de SmartStay Advisors
+```
