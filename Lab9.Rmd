@@ -108,16 +108,18 @@ diagnostico_reg <- function(rmse_train, rmse_test, r2_train, r2_test, umbral = 0
 # y se aplican tanto a entrenamiento como a prueba para evitar data leakage.
 
 # Clasificación: features desde train_tree_clf (sin price_cat)
-features_clf <- train_tree_clf %>% select(-price_cat)
+features_clf <- as.data.frame(train_tree_clf %>% select(-price_cat))
 rna_clf_min <- sapply(features_clf, min, na.rm = TRUE)
 rna_clf_max <- sapply(features_clf, max, na.rm = TRUE)
 
-minmax_col <- function(x, mn, mx) ifelse(mx == mn, 0, (x - mn) / (mx - mn))
+normalize_minmax <- function(df, min_vals, max_vals) {
+  ranges <- max_vals - min_vals
+  ranges[ranges == 0] <- 1
+  as.data.frame(sweep(sweep(as.matrix(df), 2, min_vals, "-"), 2, ranges, "/"))
+}
 
 # Conjunto de entrenamiento normalizado para clasificación
-train_rna_features <- as.data.frame(
-  mapply(minmax_col, features_clf, rna_clf_min, rna_clf_max)
-)
+train_rna_features <- normalize_minmax(features_clf, rna_clf_min, rna_clf_max)
 train_rna_clf <- train_rna_features
 train_rna_clf$Economica  <- as.integer(train_tree_clf$price_cat == "Economica")
 train_rna_clf$Intermedia <- as.integer(train_tree_clf$price_cat == "Intermedia")
@@ -125,10 +127,8 @@ train_rna_clf$Cara       <- as.integer(train_tree_clf$price_cat == "Cara")
 train_rna_clf$price_cat  <- train_tree_clf$price_cat
 
 # Conjunto de prueba normalizado para clasificación
-test_features_clf <- test_tree_clf %>% select(-price_cat)
-test_rna_features <- as.data.frame(
-  mapply(minmax_col, test_features_clf, rna_clf_min, rna_clf_max)
-)
+test_features_clf <- as.data.frame(test_tree_clf %>% select(-price_cat))
+test_rna_features <- normalize_minmax(test_features_clf, rna_clf_min, rna_clf_max)
 test_rna_clf <- test_rna_features
 test_rna_clf$Economica  <- as.integer(test_tree_clf$price_cat == "Economica")
 test_rna_clf$Intermedia <- as.integer(test_tree_clf$price_cat == "Intermedia")
@@ -139,8 +139,8 @@ test_rna_clf$price_cat  <- test_tree_clf$price_cat
 rna_reg_min <- sapply(train_num, min, na.rm = TRUE)
 rna_reg_max <- sapply(train_num, max, na.rm = TRUE)
 
-train_rna_reg <- as.data.frame(mapply(minmax_col, train_num, rna_reg_min, rna_reg_max))
-test_rna_reg  <- as.data.frame(mapply(minmax_col, test_num,  rna_reg_min, rna_reg_max))
+train_rna_reg <- normalize_minmax(train_num, rna_reg_min, rna_reg_max)
+test_rna_reg  <- normalize_minmax(test_num,  rna_reg_min, rna_reg_max)
 
 # Fórmulas para neuralnet
 feature_names_clf <- names(features_clf)
@@ -174,20 +174,61 @@ En los conjuntos normalizados para RNA (`train_rna_clf` y `test_rna_clf`), la va
 ## Actividad 3 — Modelos de RNA para Clasificación
 
 ```{r modelos-clasificacion}
+set.seed(123)
+tiempo_una_capa <- system.time({
+  modelo_una_capa <- neuralnet(
+    formula_clf,
+    data = train_rna_clf,
+    hidden = 64,
+    act.fct = "logistic",
+    linear.output = FALSE,
+    threshold = 0.1,
+    stepmax = 1e5
+  )
+})
 
+set.seed(123)
+tiempo_dos_capas <- system.time({
+  modelo_dos_capas <- neuralnet(
+    formula_clf,
+    data = train_rna_clf,
+    hidden = 32,
+    act.fct = "tanh",
+    linear.output = FALSE,
+    threshold = 0.1,
+    stepmax = 1e5
+  )
+})
 ```
 
 ## Actividad 4 — Predicciones de Clasificación
 
 ```{r predicciones-clasificacion}
-# Predicciones de ambos modelos sobre train y test
-# Para neuralnet: compute(modelo, newdata)$net.result -> argmax -> clase predicha
+clases_clf <- c("Economica", "Intermedia", "Cara")
+
+# Predicciones sobre el conjunto de prueba
+pred_probs_una_test <- compute(modelo_una_capa, test_rna_clf[, feature_names_clf])$net.result
+pred_clase_una_test <- factor(clases_clf[apply(pred_probs_una_test, 1, which.max)], levels = clases_clf)
+
+pred_probs_dos_test <- compute(modelo_dos_capas, test_rna_clf[, feature_names_clf])$net.result
+pred_clase_dos_test <- factor(clases_clf[apply(pred_probs_dos_test, 1, which.max)], levels = clases_clf)
+
+# Predicciones sobre entrenamiento (necesarias para análisis de sobreajuste en Actividad 7)
+pred_probs_una_train <- compute(modelo_una_capa, train_rna_clf[, feature_names_clf])$net.result
+pred_clase_una_train <- factor(clases_clf[apply(pred_probs_una_train, 1, which.max)], levels = clases_clf)
+
+pred_probs_dos_train <- compute(modelo_dos_capas, train_rna_clf[, feature_names_clf])$net.result
+pred_clase_dos_train <- factor(clases_clf[apply(pred_probs_dos_train, 1, which.max)], levels = clases_clf)
 ```
 
 ## Actividad 5 — Matrices de Confusión
 
 ```{r matrices-confusion-clf}
-# confusionMatrix() o table() para cada modelo
+cat("Modelo de Una Capa\n")
+confusionMatrix(pred_clase_una_test, test_rna_clf$price_cat)
+
+cat("Modelo de Dos Capas\n")
+confusionMatrix(pred_clase_dos_test, test_rna_clf$price_cat)
 ```
 
 ## Actividad 6 — Comparación de Modelos de Clasificación RNA
