@@ -304,9 +304,45 @@ Por otro lado, vemos un comportamiento bastante similar en el modelo de 32 neuro
 ## Actividad 8 — Tuneo del Mejor Modelo de Clasificación
 
 ```{r tuneo-clasificacion}
-# Ajustar arquitectura y parámetros del mejor modelo de clasificación
-# Evaluar si mejora sin sobreajustarse
+set.seed(123)
+tiempo_tuned_clf <- system.time({
+  modelo_tuned_clf <- neuralnet(
+    formula_clf,
+    data = train_rna_sample_clf,
+    hidden = c(128, 64),
+    act.fct = "logistic",
+    linear.output = FALSE,
+    threshold = 0.5,
+    stepmax = 1e5
+  )
+})
+
+clases_clf <- c("Economica", "Intermedia", "Cara")
+
+pred_tuned_train <- factor(
+  clases_clf[apply(compute(modelo_tuned_clf, train_rna_clf[, feature_names_clf])$net.result, 1, which.max)],
+  levels = clases_clf
+)
+pred_tuned_test <- factor(
+  clases_clf[apply(compute(modelo_tuned_clf, test_rna_clf[, feature_names_clf])$net.result, 1, which.max)],
+  levels = clases_clf
+)
+
+acc_tuned_train <- calc_acc(train_rna_clf$price_cat, pred_tuned_train)
+acc_tuned_test  <- calc_acc(test_rna_clf$price_cat,  pred_tuned_test)
+
+tabla_comparacion_tuned <- data.frame(
+  Modelo      = c("64 neuronas (original)", "128-64 neuronas (tuneado)"),
+  Acc_Train   = round(c(acc_una_train, acc_tuned_train), 4),
+  Acc_Test    = round(c(acc_una_test,  acc_tuned_test),  4)
+)
+
+kable(tabla_comparacion_tuned, caption = "Comparación modelo original vs. tuneado")
 ```
+
+En este escenario se pensó que darle una mayor capacidad de razonamiento y trabajar con dos capas iba a apoyar para obtener mejores resultados en cuanto al accuracy, pero fue todo lo contrario. Se decidió darle a la primera capa 128 neuronas y a la segunda 64. A pesar de esto, el accuracy en el entrenamiento cayó a 0.3287 y en el conjunto de prueba se quedó en 0.3278, una diferencia superior a 0.24 contra el modelo de 64 neuronas. Esto evidencia que no siempre dar una mayor capacidad de razonamiento al modelo va a llevar a mejores resultados, lo que puede explicarse dado que el modelo llega a un punto en donde ya no converge a un resultado aceptable, sino que la efectividad empieza a decaer, que es lo que se refleja en los resultados.
+
+Adicionalmente, al analizar los resultados en entrenamiento y prueba, tampoco se evidencia sobreajuste, pero como se mencionó previamente, los resultados no fueron buenos, sino peores incluso que una clasificación aleatoria, ya que para tres clases balanceadas una clasificación aleatoria alcanzaría un accuracy de 0.33.
 
 ## Actividad 9 — Variable Respuesta para Regresión
 
