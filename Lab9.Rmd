@@ -175,14 +175,18 @@ En los conjuntos normalizados para RNA (`train_rna_clf` y `test_rna_clf`), la va
 
 ```{r modelos-clasificacion}
 set.seed(123)
+idx_rna_clf <- sample(nrow(train_rna_clf), 500)
+train_rna_sample_clf <- train_rna_clf[idx_rna_clf, ]
+
+set.seed(123)
 tiempo_una_capa <- system.time({
   modelo_una_capa <- neuralnet(
     formula_clf,
-    data = train_rna_clf,
+    data = train_rna_sample_clf,
     hidden = 64,
     act.fct = "logistic",
     linear.output = FALSE,
-    threshold = 0.1,
+    threshold = 0.5,
     stepmax = 1e5
   )
 })
@@ -191,11 +195,11 @@ set.seed(123)
 tiempo_dos_capas <- system.time({
   modelo_dos_capas <- neuralnet(
     formula_clf,
-    data = train_rna_clf,
+    data = train_rna_sample_clf,
     hidden = 32,
     act.fct = "tanh",
     linear.output = FALSE,
-    threshold = 0.1,
+    threshold = 0.5,
     stepmax = 1e5
   )
 })
@@ -224,25 +228,78 @@ pred_clase_dos_train <- factor(clases_clf[apply(pred_probs_dos_train, 1, which.m
 ## Actividad 5 — Matrices de Confusión
 
 ```{r matrices-confusion-clf}
-cat("Modelo de Una Capa\n")
-confusionMatrix(pred_clase_una_test, test_rna_clf$price_cat)
+metricas_clf <- function(nombre, pred, real) {
+  cat("===", nombre, "===\n\n")
+  print(table(Prediccion = pred, Referencia = real))
+  cat("\n")
 
-cat("Modelo de Dos Capas\n")
-confusionMatrix(pred_clase_dos_test, test_rna_clf$price_cat)
+  clases <- c("Economica", "Intermedia", "Cara")
+  acc <- mean(as.character(pred) == as.character(real))
+
+  tabla <- t(sapply(clases, function(cls) {
+    tp <- sum(pred == cls & real == cls)
+    fp <- sum(pred == cls & real != cls)
+    fn <- sum(pred != cls & real == cls)
+    pr <- ifelse(tp + fp == 0, 0, tp / (tp + fp))
+    re <- ifelse(tp + fn == 0, 0, tp / (tp + fn))
+    f1 <- ifelse(pr + re == 0, 0, 2 * pr * re / (pr + re))
+    c(Precision = round(pr, 4), Recall = round(re, 4), F1 = round(f1, 4))
+  }))
+
+  cat("Accuracy:", round(acc, 4), "\n\n")
+  print(tabla)
+  cat("\n")
+}
+
+metricas_clf("Modelo de 64 neuronas",  pred_clase_una_test, test_rna_clf$price_cat)
+metricas_clf("Modelo de 32 neuronas", pred_clase_dos_test, test_rna_clf$price_cat)
 ```
+
 
 ## Actividad 6 — Comparación de Modelos de Clasificación RNA
 
 ```{r comparacion-clasificacion}
-# Comparar exactitud, tiempo de procesamiento (system.time) y distribución de errores
+cat("Tiempo Modelo 64 neuronas: ", tiempo_una_capa["elapsed"], "seg\n")
+cat("Tiempo Modelo 32 neuronas: ", tiempo_dos_capas["elapsed"], "seg\n")
 ```
+
+Tras analizar los resultados presentados por cada uno de los modelos, se identificó que el modelo de 64 neuronas tiene un accuracy de 0.5721, mientras que el de 32 neuronas alcanzó 0.5568. A pesar de duplicar la cantidad de neuronas, la mejoría entre una métrica y la otra es mínima, de menos de 0.02, lo que puede ser un indicio de que el modelo converge en esa zona. No se logra evidenciar una diferencia notoria a pesar del cambio considerable en la cantidad de neuronas.
+
+Por otro lado, al analizar las matrices de confusión para cada uno de los casos, vemos que donde más se confunde el modelo de 64 neuronas es con la clasificación intermedia de propiedades. Se predijeron como económicas observaciones que resultaron ser intermedias, y como caras otras que también terminaron siendo intermedias. Esto puede explicarse a partir de la idea de que una propiedad intermedia comparte características con una económica y con una cara, lo que le dificulta al modelo hacer una clasificación adecuada para esta categoría.
+
+Un caso similar se observa en el otro modelo, donde una vez más las mayores discrepancias se presentan con la categoría intermedia. Uno de los puntos más destacables al analizar las matrices es que los valores no cambian considerablemente entre un modelo y otro. Por ejemplo, las observaciones predichas como Intermedia que en realidad eran Economica fueron 1,601 en el modelo de 64 neuronas y 1,632 en el de 32 neuronas, una diferencia de tan solo 31 casas. Lo mismo se observa en las demás celdas.
+
+En cuanto al tiempo de procesamiento, sorprendentemente el modelo con 64 neuronas, que utiliza activación logística, tardó 0.406 segundos, mientras que el modelo con 32 neuronas, que utiliza tanh, tardó 1.198 segundos, más del doble. Esto resulta contraintuitivo, ya que se esperaría que una red más pequeña convergiera más rápido; sin embargo, la función tanh parece requerir más iteraciones para alcanzar el umbral de convergencia establecido.
 
 ## Actividad 7 — Análisis de Sobreajuste en Clasificación
 
 ```{r sobreajuste-clasificacion}
-# Comparar exactitud en entrenamiento vs. prueba para ambos modelos
-# Aplicar diagnostico_clf()
+acc_una_train <- calc_acc(train_rna_clf$price_cat, pred_clase_una_train)
+acc_una_test  <- calc_acc(test_rna_clf$price_cat,  pred_clase_una_test)
+
+acc_dos_train <- calc_acc(train_rna_clf$price_cat, pred_clase_dos_train)
+acc_dos_test  <- calc_acc(test_rna_clf$price_cat,  pred_clase_dos_test)
+
+tabla_64 <- data.frame(
+  Conjunto     = c("Entrenamiento", "Prueba"),
+  Accuracy     = round(c(acc_una_train, acc_una_test), 4),
+  Diagnostico  = c(diagnostico_clf(acc_una_train, acc_una_test), "")
+)
+
+tabla_32 <- data.frame(
+  Conjunto     = c("Entrenamiento", "Prueba"),
+  Accuracy     = round(c(acc_dos_train, acc_dos_test), 4),
+  Diagnostico  = c(diagnostico_clf(acc_dos_train, acc_dos_test), "")
+)
+
+kable(tabla_64, caption = "Modelo 64 neuronas — activación logística")
+kable(tabla_32, caption = "Modelo 32 neuronas — activación tanh")
 ```
+
+Tras analizar los datos en el modelo de 64 neuronas, vemos que el accuracy en el entrenamiento fue de 0.5774, como es de esperarse. En el conjunto de prueba la métrica se redujo pero no de forma considerable, ya que ésta fue de 0.5721. Al no presentarse un declive notorio en los valores de la métrica, no se puede decir que hubo sobreajuste, ya que los resultados encontrados son bastante similares entre sí. Tendríamos sobreajuste si, por ejemplo, en el conjunto de prueba la métrica presentara una diferencia de 0.3 menos, que estuviera en 0.2721. Ahí sí se podría argumentar que el modelo presentó sobreajuste, ya que tendríamos un rendimiento bastante alto en entrenamiento pero el rendimiento en prueba cae significativamente.
+
+Por otro lado, vemos un comportamiento bastante similar en el modelo de 32 neuronas. En este caso, el accuracy en entrenamiento fue de 0.5581 y en el de prueba fue de 0.5568, una diferencia de apenas 0.0013. Bajo el mismo razonamiento aplicado en el modelo anterior, en este tampoco se podría decir que hay sobreajuste.
+
 
 ## Actividad 8 — Tuneo del Mejor Modelo de Clasificación
 
