@@ -351,25 +351,146 @@ Para la tarea de regresión, la variable respuesta es el precio por noche (`pric
 ## Actividad 10 — Modelos de RNA para Regresión
 
 ```{r modelos-regresion}
-# Modelo 1: una capa oculta de 64 neuronas, activación logística, salida lineal (sin activación)
+set.seed(123)
+idx_rna_reg <- sample(nrow(train_rna_reg), 500)
+train_rna_sample_reg <- train_rna_reg[idx_rna_reg, ]
 
-# Modelo 2: dos capas ocultas de 128 y 64 neuronas, activación tanh, salida lineal
+set.seed(123)
+tiempo_reg1 <- system.time({
+  modelo_reg1 <- neuralnet(
+    formula_reg,
+    data = train_rna_sample_reg,
+    hidden = 64,
+    act.fct = "logistic",
+    linear.output = TRUE,
+    threshold = 0.5,
+    stepmax = 1e5
+  )
+})
+
+set.seed(123)
+tiempo_reg2 <- system.time({
+  modelo_reg2 <- neuralnet(
+    formula_reg,
+    data = train_rna_sample_reg,
+    hidden = c(128, 64),
+    act.fct = "tanh",
+    linear.output = TRUE,
+    threshold = 0.5,
+    stepmax = 1e5
+  )
+})
+
+# Desnormalización: revertir la transformación min-max sobre price
+price_min <- rna_reg_min["price"]
+price_max <- rna_reg_max["price"]
+denorm_price <- function(x) x * (price_max - price_min) + price_min
+
+# Predicciones en entrenamiento (para análisis de sobreajuste en Actividad 12)
+pred_reg1_train <- denorm_price(
+  compute(modelo_reg1, train_rna_reg[, feature_names_reg])$net.result
+)
+pred_reg2_train <- denorm_price(
+  compute(modelo_reg2, train_rna_reg[, feature_names_reg])$net.result
+)
+
+# Predicciones en prueba
+pred_reg1_test <- denorm_price(
+  compute(modelo_reg1, test_rna_reg[, feature_names_reg])$net.result
+)
+pred_reg2_test <- denorm_price(
+  compute(modelo_reg2, test_rna_reg[, feature_names_reg])$net.result
+)
 ```
+
 
 ## Actividad 11 — Comparación de Modelos de Regresión RNA
 
 ```{r comparacion-regresion}
-# Comparar RMSE, MAE y R2 en train y test para ambos modelos de regresión
-# Usar calc_reg_row() para construir tabla de métricas
+tabla_reg <- function(real_train, pred_train, real_test, pred_test) {
+  data.frame(
+    Conjunto = c("Entrenamiento", "Prueba"),
+    RMSE = round(c(calc_rmse(real_train, pred_train), calc_rmse(real_test, pred_test)), 2),
+    MAE  = round(c(calc_mae(real_train,  pred_train), calc_mae(real_test,  pred_test)), 2),
+    MSE  = round(c(calc_rmse(real_train, pred_train)^2, calc_rmse(real_test, pred_test)^2), 2),
+    R2   = round(c(calc_r2(real_train,   pred_train), calc_r2(real_test,    pred_test)), 4)
+  )
+}
+
+kable(
+  tabla_reg(train_num$price, pred_reg1_train, test_num$price, pred_reg1_test),
+  caption = "Modelo 1 — 64 neuronas, activación logística"
+)
+
+kable(
+  tabla_reg(train_num$price, pred_reg2_train, test_num$price, pred_reg2_test),
+  caption = "Modelo 2 — 128-64 neuronas, activación tanh"
+)
 ```
+
+El rendimiento de ambos modelos es bastante negativo. Al revisar el Modelo 1, nos vamos a dar cuenta de que el RMSE en entrenamiento fue de 12,818 y en prueba fue de 11,013. No hay una diferencia considerable entre las métricas de entrenamiento y prueba, pero sí son resultados malos. Por ejemplo, el MAE en entrenamiento fue de 4,970 y en prueba fue de 5,025, lo cual quiere decir que estamos estimando el precio de las propiedades con un error de más de 5,000, lo cual no es bueno para ningún negocio y especialmente para SmartStay, cuyo objetivo es trabajar con modelos que puedan darles precios adecuados para las propiedades. Una persona que mire que una noche en un Airbnb está sobrevalorada por más de 5,000 lo lógico es que no quiera considerar esa propiedad.
+
+En cuanto al R2, este dio un valor negativo tanto en entrenamiento como en prueba, lo cual es alarmante porque quiere decir que el modelo es peor que predecir la media del precio para todas las propiedades, es decir, no logra capturar ninguna tendencia útil en los datos.
+
+En cuanto al segundo modelo, en donde se trabajó con dos capas, una de 128 neuronas y la otra de 64, los resultados presentaron un comportamiento mixto. El RMSE en entrenamiento fue de 17,483 y en prueba fue de 15,486, valores peores que los del primer modelo. Sin embargo, el MAE mejoró: en entrenamiento el error promedio fue de 3,255 y en prueba de 3,169, una reducción respecto al Modelo 1. Esto indica que el Modelo 2 comete menos errores promedio, pero cuando se equivoca lo hace de forma más extrema, lo que eleva el RMSE. Aun así, un error promedio superior a $3,000 sigue siendo inaceptable para el propósito de la consultoría. El R2 muestra un comportamiento muy similar al del primer modelo: el valor en entrenamiento es de -50.97 y en prueba de -31.22, confirmando que tampoco logra superar la línea base de predicción por media.
+
 
 ## Actividad 12 — Análisis de Sobreajuste con Curvas de Aprendizaje
 
 ```{r curvas-aprendizaje}
-# Entrenar el mejor modelo de regresión con fracciones crecientes del conjunto de entrenamiento
-# Registrar error en train y validación en cada punto
-# Graficar curva de aprendizaje con ggplot2
+fracciones <- seq(50, 500, by = 50)
+
+curva_modelo <- function(hidden_layers, act_fn) {
+  resultados <- lapply(fracciones, function(n) {
+    set.seed(123)
+    idx <- sample(nrow(train_rna_sample_reg), n)
+    muestra <- train_rna_sample_reg[idx, ]
+
+    modelo_lc <- neuralnet(
+      formula_reg,
+      data = muestra,
+      hidden = hidden_layers,
+      act.fct = act_fn,
+      linear.output = TRUE,
+      threshold = 0.5,
+      stepmax = 1e5
+    )
+
+    pred_tr <- denorm_price(compute(modelo_lc, muestra[, feature_names_reg])$net.result)
+    pred_te <- denorm_price(compute(modelo_lc, test_rna_reg[, feature_names_reg])$net.result)
+
+    data.frame(
+      n = n,
+      RMSE_Train = calc_rmse(denorm_price(muestra[["price"]]), pred_tr),
+      RMSE_Test  = calc_rmse(test_num$price, pred_te)
+    )
+  })
+  do.call(rbind, resultados)
+}
+
+graficar_curva <- function(curva_lc, titulo) {
+  curva_long <- rbind(
+    data.frame(n = curva_lc$n, RMSE = curva_lc$RMSE_Train, Conjunto = "Entrenamiento"),
+    data.frame(n = curva_lc$n, RMSE = curva_lc$RMSE_Test,  Conjunto = "Prueba")
+  )
+  ggplot(curva_long, aes(x = n, y = RMSE, color = Conjunto)) +
+    geom_line(linewidth = 0.8) +
+    geom_point(size = 2) +
+    labs(title = titulo, x = "Tamaño del conjunto de entrenamiento", y = "RMSE (USD)") +
+    theme_minimal()
+}
+
+curva_reg1 <- curva_modelo(64, "logistic")
+graficar_curva(curva_reg1, "Curva de Aprendizaje — Modelo 1: 64 neuronas (logística)")
+
+curva_reg2 <- curva_modelo(c(128, 64), "tanh")
+graficar_curva(curva_reg2, "Curva de Aprendizaje — Modelo 2: 128-64 neuronas (tanh)")
 ```
+
+
+Al analizar la curva de aprendizaje del Modelo 1, se puede observar que no hay sobreajuste. Si bien es cierto que el de prueba tiene peores métricas, esto es esperable al ser datos de prueba. Ambas curvas van decayendo y convergiendo a una tasa similar, y realmente no hay una diferencia tan elevada entre una y la otra.
+
+Sin embargo, al revisar el Modelo 2, sí se puede argumentar que hay sobreajuste. En el entrenamiento se observa un RMSE bastante estabilizado en valores bajos a lo largo de todo el gráfico, desde tamaños de 50 hasta 500 filas. Mientras tanto, el RMSE de prueba siempre se mantiene muy por encima, con una diferencia superior a 20,000 dólares USD desde los tamaños más pequeños del conjunto de entrenamiento hasta el punto donde comienza a converger, entre las 250 y las 500 filas. Esta brecha tan amplia indica que el modelo memorizó los ejemplos de entrenamiento en lugar de aprender patrones generalizables, lo que explica el desempeño tan deficiente en prueba.
 
 ## Actividad 13 — Tuneo del Mejor Modelo de Regresión
 
