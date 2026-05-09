@@ -495,17 +495,94 @@ Sin embargo, al revisar el Modelo 2, sí se puede argumentar que hay sobreajuste
 ## Actividad 13 — Tuneo del Mejor Modelo de Regresión
 
 ```{r tuneo-regresion}
-# Ajustar arquitectura y parámetros del mejor modelo de regresión
-# Evaluar si mejora sin sobreajustarse
+set.seed(123)
+idx_tuned_reg <- sample(nrow(train_rna_reg), 1500)
+train_rna_sample_tuned <- train_rna_reg[idx_tuned_reg, ]
+
+set.seed(123)
+modelo_tuned_reg <- neuralnet(
+  formula_reg,
+  data = train_rna_sample_tuned,
+  hidden = 64,
+  act.fct = "logistic",
+  linear.output = TRUE,
+  threshold = 0.3,
+  stepmax = 1e5
+)
+
+pred_tuned_reg_train <- denorm_price(
+  compute(modelo_tuned_reg, train_rna_reg[, feature_names_reg])$net.result
+)
+pred_tuned_reg_test <- denorm_price(
+  compute(modelo_tuned_reg, test_rna_reg[, feature_names_reg])$net.result
+)
+
+tabla_tuneo_reg <- data.frame(
+  Modelo     = c("64 neuronas (original)", "64 neuronas (tuneado)"),
+  RMSE_Train = round(c(calc_rmse(train_num$price, pred_reg1_train),
+                        calc_rmse(train_num$price, pred_tuned_reg_train)), 2),
+  MAE_Train  = round(c(calc_mae(train_num$price, pred_reg1_train),
+                        calc_mae(train_num$price, pred_tuned_reg_train)), 2),
+  R2_Train   = round(c(calc_r2(train_num$price, pred_reg1_train),
+                        calc_r2(train_num$price, pred_tuned_reg_train)), 4),
+  RMSE_Test  = round(c(calc_rmse(test_num$price, pred_reg1_test),
+                        calc_rmse(test_num$price, pred_tuned_reg_test)), 2),
+  MAE_Test   = round(c(calc_mae(test_num$price, pred_reg1_test),
+                        calc_mae(test_num$price, pred_tuned_reg_test)), 2),
+  R2_Test    = round(c(calc_r2(test_num$price, pred_reg1_test),
+                        calc_r2(test_num$price, pred_tuned_reg_test)), 4)
+)
+
+kable(tabla_tuneo_reg, caption = "Comparación modelo original vs. tuneado — Regresión")
 ```
+
+Las métricas demuestran que, a pesar de aumentar el tamaño de la muestra y reducir el threshold para mejorar el rendimiento del modelo, no hubo una mejora considerable. Si nos enfocamos únicamente en el RMSE, este está más elevado en el modelo tuneado que en el original. Sin embargo, si analizamos el MAE, sí hay una mejora: el MAE de prueba en el modelo original fue de 5,025 dólares USD, mientras que en el tuneado fue de 3,070 dólares USD. Sigue siendo algo deplorable para el negocio con el que se está trabajando, pero sí se evidencia una mejora en esta métrica al pasar al modelo tuneado.
 
 ## Actividad 14 — RNA vs. Algoritmos Anteriores: Comparación en Regresión
 
-```{r comparacion-global-regresion}
-# Tabla comparativa: Árbol de regresión, Random Forest, Naive Bayes, KNN,
-# Regresión Lineal, SVR, RNA (mejor modelo)
-# Incluir métricas y tiempo de procesamiento
+```{r tiempo-rna-reg}
+set.seed(123)
+tiempo_rna_reg <- system.time({
+  idx_t <- sample(nrow(train_rna_reg), 1500)
+  neuralnet(
+    formula_reg,
+    data          = train_rna_reg[idx_t, ],
+    hidden        = 64,
+    act.fct       = "logistic",
+    linear.output = TRUE,
+    threshold     = 0.3,
+    stepmax       = 1e5
+  )
+})
+
+cat("Tiempo de entrenamiento RNA:", round(tiempo_rna_reg["elapsed"], 4), "s\n")
 ```
+
+```{r comparacion-global-regresion}
+rmse_rna_test14 <- round(calc_rmse(test_num$price, pred_tuned_reg_test), 2)
+mae_rna_test14  <- round(calc_mae(test_num$price, pred_tuned_reg_test), 2)
+r2_rna_test14   <- round(calc_r2(test_num$price, pred_tuned_reg_test), 4)
+
+# Valores de modelos anteriores extraídos de discusiones en Lab6.
+tabla_comp_reg14 <- data.frame(
+  Modelo    = c("Regresión lineal", "Árbol de regresión", "Random Forest",
+                "Naive Bayes",      "KNN regresión",       "RNA"),
+  RMSE_Test = c("2580.00", "1554.16", "1272.99", "2805.00", "2565.00",
+                sprintf("%.2f", rmse_rna_test14)),
+  MAE_Test  = c("No Calculado", "246.00", "179.00", "No Calculado", "309.00",
+                sprintf("%.2f", mae_rna_test14)),
+  R2_Test   = c("0.1053", "0.6755", "0.7823", "-0.0600", "0.1156",
+                sprintf("%.4f", r2_rna_test14))
+)
+
+kable(tabla_comp_reg14,
+      caption = "RNA vs. modelos de regresión anteriores — conjunto de prueba")
+```
+
+Tras analizar los datos, en este escenario la RNA fue el peor modelo y con diferencia. Tiene el RMSE más alto y el MAE más alto en cuanto al conjunto de prueba.
+
+Hasta el momento los dos modelos que han presentado mejores resultados han sido el árbol de regresión y el Random Forest. Si nos enfocamos únicamente en el MAE, veríamos que en el árbol de regresión la diferencia fue de 246 dólares USD, en Random Forest de 179 dólares USD, mientras que en la RNA se da un salto considerable a 3,070 dólares USD. Por lo cual, de entre todos los modelos que se han entrenado hasta la fecha, sería mejor optar por alguno de los dos asociados con árboles en vez de la RNA, que a pesar de la complejidad del modelo ha presentado los peores resultados hasta la fecha.
+
 
 ## Actividad 15 — RNA vs. Algoritmos Anteriores: Comparación en Clasificación
 
