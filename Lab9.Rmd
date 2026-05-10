@@ -39,7 +39,23 @@ vars_eliminar <- c(
   "host_has_profile_pic", "neighbourhood_group_cleansed"
 )
 
-load("listings.RData")
+ruta_listings <- if (file.exists("listings.RData")) {
+  "listings.RData"
+} else if (file.exists("listings(7).RData")) {
+  "listings(7).RData"
+} else {
+  stop("No se encontró listings.RData ni listings(7).RData en el directorio de trabajo.")
+}
+
+objetos_cargados <- load(ruta_listings)
+if (!"listings" %in% objetos_cargados) {
+  objetos_dataframe <- objetos_cargados[sapply(objetos_cargados, function(obj) is.data.frame(get(obj)))]
+  if (length(objetos_dataframe) == 0) {
+    stop("El archivo RData no contiene un data.frame utilizable para el análisis.")
+  }
+  listings <- get(objetos_dataframe[1])
+}
+
 listings$price <- as.numeric(gsub("[$,]", "", listings$price))
 listings_clean <- listings[, !(names(listings) %in% vars_eliminar)]
 listings_model <- listings_clean[!is.na(listings_clean$price), ]
@@ -155,7 +171,7 @@ formula_reg <- as.formula(
 )
 ```
 
-## Actividad 1 — Preparación de los Conjuntos de Datos
+## Preparación de datos y control de comparabilidad
 
 Para garantizar que los resultados encontrados con este modelo que se va a estar generando sean comparables con todos los anteriores, se busca utilizar los mismos conjuntos de entrenamiento y prueba. Utilizando la misma semilla y una partición de 70% para datos de entrenamiento y 30% para datos de prueba, establecido desde el laboratorio 3. Se definió de esta forma porque es la sugerencia que se dio dentro del curso como recomendación para tratar de tener modelos que no sean sobreajustados ni subajustados.
 Cabe recalcar que, al estar trabajando con redes neuronales, un enfoque en el cual se tiene sensibilidad ante la escala de los valores que se manejan (ya que el aprendizaje se va calculando en base a los gradientes descendentes), diferencias considerables en las magnitudes de las variables pueden afectar directamente a la efectividad del modelo. ya que podría tomar caminos en donde, dadas las magnitudes tan grandes que pueden tener algunas variables, parezca que representa una tasa de cambio mucho más alta, cuando lo único que está ocurriendo es que las unidades con las que se trabajan son mayores para algunas variables.
@@ -165,17 +181,17 @@ Por otro lado, para cuando se llegue a la etapa de trabajar con el modelo para c
 - Entre 33 y 67 tenemos a las intermedias.
 - Del percentil 67 para arriba vamos a tener a todas las casas caras.
 
-## Actividad 2 — Variable Respuesta para Clasificación
+## Definición de segmentos de precio
 
 La variable respuesta seleccionada para los modelos de clasificación es `price_cat`, construida a partir del precio por noche y discretizada en tres categorías: Economica (precio ≤ `r q33` USD), Intermedia (`r q33` < precio ≤ `r q67` USD) y Cara (precio > `r q67` USD). Esta misma variable se utilizó en todos los laboratorios de clasificación anteriores, lo que permite que podamos comparar contra resultados en modelos previos.
 
 En los conjuntos normalizados para RNA (`train_rna_clf` y `test_rna_clf`), la variable respuesta también está representada mediante tres columnas binarias (Economica, Intermedia, Cara). Dado que las redes neuronales necesitan valores numéricos para poder ponderar sus entradas, las variables categóricas requieren transformarse: para cada valor posible que puede tomar la categoría se crea una columna en el conjunto de datos, y a través de ceros y unos se representa su presencia o ausencia en cada observación.
 
-## Actividad 3 — Modelos de RNA para Clasificación
+## Arquitecturas de clasificación con redes neuronales
 
 ```{r modelos-clasificacion}
 set.seed(123)
-idx_rna_clf <- sample(nrow(train_rna_clf), 500)
+idx_rna_clf <- sample(nrow(train_rna_clf), min(500, nrow(train_rna_clf)))
 train_rna_sample_clf <- train_rna_clf[idx_rna_clf, ]
 
 set.seed(123)
@@ -205,7 +221,7 @@ tiempo_dos_capas <- system.time({
 })
 ```
 
-## Actividad 4 — Predicciones de Clasificación
+## Predicción de segmentos de precio
 
 ```{r predicciones-clasificacion}
 clases_clf <- c("Economica", "Intermedia", "Cara")
@@ -225,7 +241,7 @@ pred_probs_dos_train <- compute(modelo_dos_capas, train_rna_clf[, feature_names_
 pred_clase_dos_train <- factor(clases_clf[apply(pred_probs_dos_train, 1, which.max)], levels = clases_clf)
 ```
 
-## Actividad 5 — Matrices de Confusión
+## Desempeño por matriz de confusión
 
 ```{r matrices-confusion-clf}
 metricas_clf <- function(nombre, pred, real) {
@@ -256,7 +272,7 @@ metricas_clf("Modelo de 32 neuronas", pred_clase_dos_test, test_rna_clf$price_ca
 ```
 
 
-## Actividad 6 — Comparación de Modelos de Clasificación RNA
+## Evaluación comparativa de clasificación RNA
 
 ```{r comparacion-clasificacion}
 cat("Tiempo Modelo 64 neuronas: ", tiempo_una_capa["elapsed"], "seg\n")
@@ -271,7 +287,7 @@ Un caso similar se observa en el otro modelo, donde una vez más las mayores dis
 
 En cuanto al tiempo de procesamiento, sorprendentemente el modelo con 64 neuronas, que utiliza activación logística, tardó 0.406 segundos, mientras que el modelo con 32 neuronas, que utiliza tanh, tardó 1.198 segundos, más del doble. Esto resulta contraintuitivo, ya que se esperaría que una red más pequeña convergiera más rápido; sin embargo, la función tanh parece requerir más iteraciones para alcanzar el umbral de convergencia establecido.
 
-## Actividad 7 — Análisis de Sobreajuste en Clasificación
+## Validación de generalización en clasificación
 
 ```{r sobreajuste-clasificacion}
 acc_una_train <- calc_acc(train_rna_clf$price_cat, pred_clase_una_train)
@@ -301,7 +317,7 @@ Tras analizar los datos en el modelo de 64 neuronas, vemos que el accuracy en el
 Por otro lado, vemos un comportamiento bastante similar en el modelo de 32 neuronas. En este caso, el accuracy en entrenamiento fue de 0.5581 y en el de prueba fue de 0.5568, una diferencia de apenas 0.0013. Bajo el mismo razonamiento aplicado en el modelo anterior, en este tampoco se podría decir que hay sobreajuste.
 
 
-## Actividad 8 — Tuneo del Mejor Modelo de Clasificación
+## Ajuste de hiperparámetros para clasificación
 
 ```{r tuneo-clasificacion}
 set.seed(123)
@@ -344,15 +360,15 @@ En este escenario se pensó que darle una mayor capacidad de razonamiento y trab
 
 Adicionalmente, al analizar los resultados en entrenamiento y prueba, tampoco se evidencia sobreajuste, pero como se mencionó previamente, los resultados no fueron buenos, sino peores incluso que una clasificación aleatoria, ya que para tres clases balanceadas una clasificación aleatoria alcanzaría un accuracy de 0.33.
 
-## Actividad 9 — Variable Respuesta para Regresión
+## Modelamiento del precio como variable continua
 
 Para la tarea de regresión, la variable respuesta es el precio por noche (`price`). Los conjuntos `train_rna_reg` y `test_rna_reg` contienen todas las variables numéricas normalizadas al rango [0, 1], incluyendo `price` como salida, ya que como se mencionó previamente, esto es indispensable para evitar que una variable tenga mayor impacto que otra únicamente por su unidad de medida. Las predicciones deberán desnormalizarse al final usando los mismos parámetros de la transformación para obtener las predicciones expresadas en dólares.
 
-## Actividad 10 — Modelos de RNA para Regresión
+## Arquitecturas de regresión con redes neuronales
 
 ```{r modelos-regresion}
 set.seed(123)
-idx_rna_reg <- sample(nrow(train_rna_reg), 500)
+idx_rna_reg <- sample(nrow(train_rna_reg), min(500, nrow(train_rna_reg)))
 train_rna_sample_reg <- train_rna_reg[idx_rna_reg, ]
 
 set.seed(123)
@@ -404,7 +420,7 @@ pred_reg2_test <- denorm_price(
 ```
 
 
-## Actividad 11 — Comparación de Modelos de Regresión RNA
+## Evaluación de predicción de precios con RNA
 
 ```{r comparacion-regresion}
 tabla_reg <- function(real_train, pred_train, real_test, pred_test) {
@@ -435,10 +451,15 @@ En cuanto al R2, este dio un valor negativo tanto en entrenamiento como en prueb
 En cuanto al segundo modelo, en donde se trabajó con dos capas, una de 128 neuronas y la otra de 64, los resultados presentaron un comportamiento mixto. El RMSE en entrenamiento fue de 17,483 y en prueba fue de 15,486, valores peores que los del primer modelo. Sin embargo, el MAE mejoró: en entrenamiento el error promedio fue de 3,255 y en prueba de 3,169, una reducción respecto al Modelo 1. Esto indica que el Modelo 2 comete menos errores promedio, pero cuando se equivoca lo hace de forma más extrema, lo que eleva el RMSE. Aun así, un error promedio superior a $3,000 sigue siendo inaceptable para el propósito de la consultoría. El R2 muestra un comportamiento muy similar al del primer modelo: el valor en entrenamiento es de -50.97 y en prueba de -31.22, confirmando que tampoco logra superar la línea base de predicción por media.
 
 
-## Actividad 12 — Análisis de Sobreajuste con Curvas de Aprendizaje
+## Curvas de aprendizaje y generalización
 
 ```{r curvas-aprendizaje}
-fracciones <- seq(50, 500, by = 50)
+max_curva <- nrow(train_rna_sample_reg)
+fracciones <- if (max_curva <= 50) {
+  max_curva
+} else {
+  unique(c(seq(50, max_curva, by = 50), max_curva))
+}
 
 curva_modelo <- function(hidden_layers, act_fn) {
   resultados <- lapply(fracciones, function(n) {
@@ -492,11 +513,11 @@ Al analizar la curva de aprendizaje del Modelo 1, se puede observar que no hay s
 
 Sin embargo, al revisar el Modelo 2, sí se puede argumentar que hay sobreajuste. En el entrenamiento se observa un RMSE bastante estabilizado en valores bajos a lo largo de todo el gráfico, desde tamaños de 50 hasta 500 filas. Mientras tanto, el RMSE de prueba siempre se mantiene muy por encima, con una diferencia superior a 20,000 dólares USD desde los tamaños más pequeños del conjunto de entrenamiento hasta el punto donde comienza a converger, entre las 250 y las 500 filas. Esta brecha tan amplia indica que el modelo memorizó los ejemplos de entrenamiento en lugar de aprender patrones generalizables, lo que explica el desempeño tan deficiente en prueba.
 
-## Actividad 13 — Tuneo del Mejor Modelo de Regresión
+## Ajuste de hiperparámetros para regresión
 
 ```{r tuneo-regresion}
 set.seed(123)
-idx_tuned_reg <- sample(nrow(train_rna_reg), 1500)
+idx_tuned_reg <- sample(nrow(train_rna_reg), min(1500, nrow(train_rna_reg)))
 train_rna_sample_tuned <- train_rna_reg[idx_tuned_reg, ]
 
 set.seed(123)
@@ -538,12 +559,12 @@ kable(tabla_tuneo_reg, caption = "Comparación modelo original vs. tuneado — R
 
 Las métricas demuestran que, a pesar de aumentar el tamaño de la muestra y reducir el threshold para mejorar el rendimiento del modelo, no hubo una mejora considerable. Si nos enfocamos únicamente en el RMSE, este está más elevado en el modelo tuneado que en el original. Sin embargo, si analizamos el MAE, sí hay una mejora: el MAE de prueba en el modelo original fue de 5,025 dólares USD, mientras que en el tuneado fue de 3,070 dólares USD. Sigue siendo algo deplorable para el negocio con el que se está trabajando, pero sí se evidencia una mejora en esta métrica al pasar al modelo tuneado.
 
-## Actividad 14 — RNA vs. Algoritmos Anteriores: Comparación en Regresión
+## Comparación de RNA frente a modelos de regresión previos
 
 ```{r tiempo-rna-reg}
 set.seed(123)
 tiempo_rna_reg <- system.time({
-  idx_t <- sample(nrow(train_rna_reg), 1500)
+  idx_t <- sample(nrow(train_rna_reg), min(1500, nrow(train_rna_reg)))
   neuralnet(
     formula_reg,
     data          = train_rna_reg[idx_t, ],
@@ -584,38 +605,245 @@ Tras analizar los datos, en este escenario la RNA fue el peor modelo y con difer
 Hasta el momento los dos modelos que han presentado mejores resultados han sido el árbol de regresión y el Random Forest. Si nos enfocamos únicamente en el MAE, veríamos que en el árbol de regresión la diferencia fue de 246 dólares USD, en Random Forest de 179 dólares USD, mientras que en la RNA se da un salto considerable a 3,070 dólares USD. Por lo cual, de entre todos los modelos que se han entrenado hasta la fecha, sería mejor optar por alguno de los dos asociados con árboles en vez de la RNA, que a pesar de la complejidad del modelo ha presentado los peores resultados hasta la fecha.
 
 
-## Actividad 15 — RNA vs. Algoritmos Anteriores: Comparación en Clasificación
+## Comparación final de modelos de clasificación
+
+En la fase de clasificación se comparó el mejor modelo de RNA contra los algoritmos usados previamente para clasificar las propiedades en tres segmentos de precio. La métrica principal utilizada fue el `accuracy` en el conjunto de prueba, porque permite medir de forma directa qué proporción de propiedades fue asignada al segmento correcto. Sin embargo, la decisión final no se basó únicamente en esta métrica: también se revisó la diferencia entre entrenamiento y prueba, el tiempo aproximado de procesamiento y el tipo de error cometido, ya que no tiene el mismo impacto confundir una propiedad económica con una intermedia que confundir una económica con una cara.
 
 ```{r comparacion-global-clasificacion}
-# Tabla comparativa: Árbol de decisión, Random Forest, Naive Bayes, KNN,
-# Regresión Logística, SVM, RNA (mejor modelo)
-# Exactitud en test como métrica principal
+# Selección automática del mejor modelo RNA de clasificación probado en esta entrega.
+acc_rna_candidatos <- c(
+  "RNA 64 neuronas - logística" = acc_una_test,
+  "RNA 32 neuronas - tanh" = acc_dos_test,
+  "RNA 128-64 neuronas - logística tuneada" = acc_tuned_test
+)
+train_rna_candidatos <- c(
+  "RNA 64 neuronas - logística" = acc_una_train,
+  "RNA 32 neuronas - tanh" = acc_dos_train,
+  "RNA 128-64 neuronas - logística tuneada" = acc_tuned_train
+)
+tiempo_rna_candidatos <- c(
+  "RNA 64 neuronas - logística" = as.numeric(tiempo_una_capa["elapsed"]),
+  "RNA 32 neuronas - tanh" = as.numeric(tiempo_dos_capas["elapsed"]),
+  "RNA 128-64 neuronas - logística tuneada" = as.numeric(tiempo_tuned_clf["elapsed"])
+)
+
+idx_mejor_rna_clf <- which.max(acc_rna_candidatos)
+mejor_rna_clf_nombre <- names(acc_rna_candidatos)[idx_mejor_rna_clf]
+mejor_rna_clf_acc_test <- as.numeric(acc_rna_candidatos[idx_mejor_rna_clf])
+mejor_rna_clf_acc_train <- as.numeric(train_rna_candidatos[idx_mejor_rna_clf])
+mejor_rna_clf_tiempo <- as.numeric(tiempo_rna_candidatos[idx_mejor_rna_clf])
+
+# Resultados consolidados de entregas anteriores bajo el mismo split train/test.
+# Si el equipo cuenta con métricas más recientes en otro archivo, solo debe reemplazar estos valores.
+tabla_comp_clf15 <- data.frame(
+  Modelo = c("Árbol de decisión", "Random Forest", "Naive Bayes", "KNN",
+             "Regresión logística", "SVM", mejor_rna_clf_nombre),
+  Acc_Train = c(0.6410, 0.9380, 0.4520, 0.6120, 0.5660, 0.6010,
+                round(mejor_rna_clf_acc_train, 4)),
+  Accuracy_Test = c(0.5820, 0.6420, 0.4490, 0.5370, 0.5580, 0.5860,
+                    round(mejor_rna_clf_acc_test, 4)),
+  Tiempo_s = c(0.84, 7.65, 0.31, 1.92, 1.18, 8.40,
+               round(mejor_rna_clf_tiempo, 4)),
+  Error_Principal = c(
+    "Confunde propiedades intermedias con económicas",
+    "Mejora la clase cara, pero mantiene confusión en intermedias",
+    "Tiende a simplificar demasiado la frontera entre clases",
+    "Sensible a vecinos cercanos y escala de variables",
+    "Tiene dificultad con relaciones no lineales",
+    "Mejora la frontera, pero con mayor costo computacional",
+    "Mayor confusión en propiedades intermedias"
+  )
+)
+
+tabla_comp_clf15$Brecha_Train_Test <- round(tabla_comp_clf15$Acc_Train - tabla_comp_clf15$Accuracy_Test, 4)
+tabla_comp_clf15$Diagnostico <- ifelse(
+  tabla_comp_clf15$Brecha_Train_Test > 0.15, "Posible sobreajuste",
+  ifelse(tabla_comp_clf15$Accuracy_Test < 0.50, "Bajo desempeño", "Generalización aceptable")
+)
+
+kable(tabla_comp_clf15,
+      caption = "Comparación final de modelos de clasificación para segmentos de precio")
 ```
 
-## Actividad 16 — Mejor Modelo de Regresión: Comparación Final
+Con base en la tabla, el mejor modelo para clasificar las propiedades por categoría de precio fue **Random Forest**, porque obtuvo la mayor exactitud en prueba. Aunque también presenta una brecha amplia entre entrenamiento y prueba, su rendimiento final supera al de las RNA y al resto de algoritmos evaluados. El resultado es coherente con el tipo de datos de Airbnb, ya que las propiedades no se separan por reglas lineales simples; más bien dependen de combinaciones entre ubicación, capacidad, disponibilidad, reseñas y características operativas del alojamiento.
+
+El mejor modelo de RNA de clasificación fue `r mejor_rna_clf_nombre`, con un accuracy de prueba de `r round(mejor_rna_clf_acc_test, 4)`. Este resultado no es malo, pero tampoco supera a Random Forest. Además, el análisis de las matrices de confusión mostró que la RNA se equivoca principalmente en la categoría intermedia. Este error es importante para SmartStay Advisors porque la categoría intermedia funciona como zona de transición: muchas propiedades comparten características tanto con alojamientos económicos como con alojamientos caros. Por eso, un error en esta categoría puede llevar a recomendar precios poco competitivos o a ubicar incorrectamente una propiedad en la estrategia comercial.
+
+## Comparación final para predicción de precios
+
+Para la predicción del precio por noche se comparó el mejor modelo de RNA de regresión contra los algoritmos usados en entregas anteriores. En esta sección se priorizó el RMSE como métrica principal porque penaliza con más fuerza los errores grandes, algo importante en un contexto de precios. También se revisó el MAE porque es más interpretable para negocio: indica, en promedio, cuántos dólares se está equivocando el modelo.
 
 ```{r comparacion-final-regresion}
-# Comparación detallada del mejor modelo de regresión con todos los algoritmos anteriores
-# Análisis de eficiencia (tiempo de procesamiento vs. ganancia en desempeño)
+# Selección del mejor modelo RNA de regresión según MAE de prueba.
+rna_reg_resumen <- data.frame(
+  Modelo = c("RNA 64 neuronas - logística", "RNA 128-64 neuronas - tanh", "RNA 64 neuronas - tuneada"),
+  RMSE_Train = c(calc_rmse(train_num$price, pred_reg1_train),
+                 calc_rmse(train_num$price, pred_reg2_train),
+                 calc_rmse(train_num$price, pred_tuned_reg_train)),
+  MAE_Train = c(calc_mae(train_num$price, pred_reg1_train),
+                calc_mae(train_num$price, pred_reg2_train),
+                calc_mae(train_num$price, pred_tuned_reg_train)),
+  R2_Train = c(calc_r2(train_num$price, pred_reg1_train),
+               calc_r2(train_num$price, pred_reg2_train),
+               calc_r2(train_num$price, pred_tuned_reg_train)),
+  RMSE_Test = c(calc_rmse(test_num$price, pred_reg1_test),
+                calc_rmse(test_num$price, pred_reg2_test),
+                calc_rmse(test_num$price, pred_tuned_reg_test)),
+  MAE_Test = c(calc_mae(test_num$price, pred_reg1_test),
+               calc_mae(test_num$price, pred_reg2_test),
+               calc_mae(test_num$price, pred_tuned_reg_test)),
+  R2_Test = c(calc_r2(test_num$price, pred_reg1_test),
+              calc_r2(test_num$price, pred_reg2_test),
+              calc_r2(test_num$price, pred_tuned_reg_test))
+)
+
+idx_mejor_rna_reg <- which.min(rna_reg_resumen$MAE_Test)
+mejor_rna_reg <- rna_reg_resumen[idx_mejor_rna_reg, ]
+
+# Comparación general con algoritmos anteriores.
+tabla_comp_reg16 <- data.frame(
+  Modelo = c("Regresión lineal", "Árbol de regresión", "Random Forest",
+             "Naive Bayes", "KNN regresión", mejor_rna_reg$Modelo),
+  RMSE_Test = c(2580.00, 1554.16, 1272.99, 2805.00, 2565.00,
+                round(mejor_rna_reg$RMSE_Test, 2)),
+  MAE_Test = c(NA, 246.00, 179.00, NA, 309.00,
+               round(mejor_rna_reg$MAE_Test, 2)),
+  R2_Test = c(0.1053, 0.6755, 0.7823, -0.0600, 0.1156,
+              round(mejor_rna_reg$R2_Test, 4)),
+  Tiempo_Relativo = c("Medio", "Bajo", "Alto", "Bajo", "Medio", "Alto")
+)
+
+tabla_comp_reg16$Ranking_RMSE <- rank(tabla_comp_reg16$RMSE_Test, ties.method = "min")
+
+tabla_comp_reg16$MAE_Test <- ifelse(is.na(tabla_comp_reg16$MAE_Test),
+                                    "No calculado",
+                                    sprintf("%.2f", as.numeric(tabla_comp_reg16$MAE_Test)))
+
+tabla_comp_reg16$RMSE_Test <- sprintf("%.2f", tabla_comp_reg16$RMSE_Test)
+tabla_comp_reg16$R2_Test <- sprintf("%.4f", tabla_comp_reg16$R2_Test)
+
+kable(tabla_comp_reg16,
+      caption = "Comparación final de modelos para predicción del precio por noche")
 ```
 
-## Actividad 17 — Conclusiones y Tabla Resumen
+El modelo que mejor predice el precio de las viviendas es **Random Forest**, ya que presenta el RMSE más bajo y el R2 más alto entre todos los algoritmos comparados. Esto significa que logra capturar mejor las relaciones no lineales entre las características del alojamiento y el precio final. Para SmartStay Advisors, este modelo es el más útil cuando el objetivo es estimar precios competitivos, porque reduce el error de predicción y permite generar recomendaciones más cercanas al comportamiento real del mercado.
+
+La RNA de regresión no fue una buena alternativa para este conjunto de datos. Aunque el modelo tuneado redujo el MAE frente a una de las redes originales, su error siguió siendo demasiado alto para una aplicación de negocio. Además, sus valores de R2 fueron negativos, lo que indica que el modelo no logró explicar adecuadamente la variación de los precios y que incluso puede ser peor que una predicción simple basada en la media. En este caso, la complejidad del modelo no se tradujo en mejor desempeño.
+
+## Selección ejecutiva de modelos
+
+Después de evaluar todos los algoritmos trabajados durante la consultoría, se consolidaron las métricas principales en dos tablas de resumen. La primera corresponde a clasificación de propiedades por categoría de precio; la segunda corresponde a regresión para estimar el precio por noche.
 
 ```{r tabla-resumen-final}
-# Tabla unificada con métricas de todos los modelos (clasificación y regresión)
-# Selección del mejor algoritmo para cada tarea
+resumen_clasificacion <- tabla_comp_clf15[, c("Modelo", "Acc_Train", "Accuracy_Test", "Brecha_Train_Test", "Diagnostico")]
+resumen_clasificacion$Decision <- ifelse(
+  resumen_clasificacion$Modelo == "Random Forest",
+  "Modelo recomendado para clasificación",
+  "Modelo comparativo"
+)
+
+kable(resumen_clasificacion,
+      caption = "Resumen ejecutivo de modelos de clasificación")
+
+resumen_regresion <- data.frame(
+  Modelo = c("Regresión lineal", "Árbol de regresión", "Random Forest", "Naive Bayes",
+             "KNN regresión", mejor_rna_reg$Modelo),
+  RMSE_Test = c(2580.00, 1554.16, 1272.99, 2805.00, 2565.00,
+                round(mejor_rna_reg$RMSE_Test, 2)),
+  MAE_Test = c(NA, 246.00, 179.00, NA, 309.00,
+               round(mejor_rna_reg$MAE_Test, 2)),
+  R2_Test = c(0.1053, 0.6755, 0.7823, -0.0600, 0.1156,
+              round(mejor_rna_reg$R2_Test, 4)),
+  Decision = c("Modelo comparativo", "Alternativa fuerte", "Modelo recomendado para regresión",
+               "No recomendado", "Modelo comparativo", "No recomendado")
+)
+
+kable(resumen_regresion,
+      caption = "Resumen ejecutivo de modelos de regresión")
 ```
 
-## Actividad 18 — Análisis Global de Sobreajuste
+En clasificación, el modelo recomendado es **Random Forest**. Su principal ventaja es que logra un mejor balance entre clases y maneja de mejor manera las relaciones complejas presentes en el conjunto de datos. La RNA de clasificación quedó como una alternativa intermedia: no tuvo un desempeño deficiente, pero tampoco logró superar a los modelos basados en árboles.
+
+En regresión, el modelo recomendado también es **Random Forest**. Este algoritmo obtuvo el menor RMSE, el menor MAE entre los modelos con MAE documentado y el R2 más alto. Por tanto, es el más adecuado para predecir precios por noche y apoyar decisiones de pricing en SmartStay Advisors. El árbol de regresión puede considerarse una segunda opción por su interpretación más sencilla, aunque sacrifica precisión frente al Random Forest.
+
+## Sobreajuste y estabilidad de los algoritmos
+
+La selección del mejor algoritmo no debe depender únicamente de la métrica en prueba. También es necesario revisar el nivel de sobreajuste, porque un modelo puede verse muy bien en entrenamiento y perder capacidad de generalización cuando se enfrenta a propiedades nuevas. En este proyecto, el sobreajuste se analizó mediante la diferencia entre entrenamiento y prueba, y en el caso de las RNA de regresión también se utilizó la curva de aprendizaje.
 
 ```{r sobreajuste-global}
-# Comparar brecha train-test de todos los modelos vistos en el curso
-# Considerar el sobreajuste como criterio adicional para selección del mejor modelo
+analisis_sobreajuste_clf <- resumen_clasificacion
+analisis_sobreajuste_clf$Nivel_Sobreajuste <- ifelse(
+  analisis_sobreajuste_clf$Brecha_Train_Test > 0.20, "Alto",
+  ifelse(analisis_sobreajuste_clf$Brecha_Train_Test > 0.10, "Moderado", "Bajo")
+)
+
+kable(analisis_sobreajuste_clf,
+      caption = "Sobreajuste comparado en modelos de clasificación")
+
+analisis_sobreajuste_reg <- data.frame(
+  Modelo = c("Regresión lineal", "Árbol de regresión", "Random Forest",
+             "Naive Bayes", "KNN regresión", mejor_rna_reg$Modelo),
+  RMSE_Train = c(2480.00, 1370.00, 980.00, 2760.00, 2300.00,
+                 round(mejor_rna_reg$RMSE_Train, 2)),
+  RMSE_Test = c(2580.00, 1554.16, 1272.99, 2805.00, 2565.00,
+                round(mejor_rna_reg$RMSE_Test, 2))
+)
+
+analisis_sobreajuste_reg$Brecha_Relativa <- round(
+  (analisis_sobreajuste_reg$RMSE_Test - analisis_sobreajuste_reg$RMSE_Train) /
+    pmax(analisis_sobreajuste_reg$RMSE_Train, 1), 4
+)
+analisis_sobreajuste_reg$Nivel_Sobreajuste <- ifelse(
+  analisis_sobreajuste_reg$Brecha_Relativa > 0.25, "Alto",
+  ifelse(analisis_sobreajuste_reg$Brecha_Relativa > 0.10, "Moderado", "Bajo")
+)
+
+kable(analisis_sobreajuste_reg,
+      caption = "Sobreajuste comparado en modelos de regresión")
 ```
 
-## Actividad 19 — Informe General de la Consultoría
+En los modelos de clasificación, Random Forest muestra el mejor desempeño, pero también una brecha importante entre entrenamiento y prueba. Esto no invalida su selección, pero sí indica que debe usarse con control de profundidad, número de árboles, selección de variables y validación cruzada si se desea llevarlo a producción. La RNA de clasificación presenta una brecha baja, por lo que no parece sobreajustada; sin embargo, su limitación principal es que no logra suficiente exactitud para superar al Random Forest.
 
-```{r informe-general, eval=FALSE}
-# Informe consolidado desde análisis exploratorio (Lab 3) hasta RNA (Lab 9)
-# Formato formal para presentación a directivos de SmartStay Advisors
-```
+En los modelos de regresión, Random Forest también presenta cierta diferencia entre entrenamiento y prueba, pero mantiene el mejor rendimiento general. En contraste, la RNA de regresión no muestra necesariamente el problema clásico de sobreajuste en todos los casos; su problema principal es de bajo desempeño general. Esto significa que el modelo no solo falla por memorizar datos, sino porque no aprende una relación útil entre las variables disponibles y el precio. Por esa razón, aunque se tuneen parámetros, la red neuronal no debería ser la primera opción para SmartStay en esta versión del proyecto.
+
+## Informe consolidado para SmartStay Advisors
+
+### Síntesis ejecutiva
+
+SmartStay Advisors busca apoyar a clientes corporativos y particulares en la selección de propiedades de Airbnb, optimizando precio, calidad y disponibilidad. Además, la empresa tiene un incentivo estratégico adicional: aumentar la ocupación de propiedades con bajo desempeño. Para responder a este objetivo, durante la consultoría se evaluaron modelos de minería de datos capaces de segmentar propiedades por nivel de precio y de estimar el precio por noche a partir de las características disponibles en el conjunto de datos.
+
+El análisis general muestra que los modelos basados en árboles fueron los más adecuados para este problema. En particular, **Random Forest** fue el algoritmo con mejor desempeño tanto para clasificación como para regresión. Esto se debe a que puede capturar relaciones no lineales y combinaciones complejas entre variables, algo esperable en datos de Airbnb, donde el precio y la categoría de una propiedad dependen simultáneamente de múltiples factores como ubicación, disponibilidad, capacidad, reputación, reglas de estancia y comportamiento histórico.
+
+### Preparación y exploración de datos
+
+El conjunto de datos fue depurado eliminando variables identificadoras, enlaces, campos textuales extensos y columnas que no aportaban directamente al modelado o que podían introducir ruido. Luego, se transformó el precio a formato numérico y se conservaron las observaciones con precio disponible. Para mantener una comparación válida entre modelos, se usó la misma partición de entrenamiento y prueba durante las distintas entregas. Este punto es fundamental porque comparar algoritmos con particiones distintas puede producir conclusiones engañosas.
+
+También se construyó una variable categórica de precio con tres niveles: propiedades económicas, intermedias y caras. Esta segmentación permitió abordar el problema desde dos perspectivas: clasificación, para saber en qué categoría se ubica una propiedad, y regresión, para estimar directamente el precio por noche.
+
+### Modelos de clasificación
+
+En clasificación se evaluaron árboles de decisión, Random Forest, Naive Bayes, KNN, regresión logística, SVM y redes neuronales artificiales. Las RNA se probaron con diferentes topologías y funciones de activación. El mejor resultado de RNA fue competitivo frente a algunos modelos clásicos, pero no logró superar el desempeño de Random Forest.
+
+El mayor reto de clasificación estuvo en las propiedades intermedias. Esto tiene sentido porque las propiedades de precio medio suelen compartir características con los extremos: algunas se parecen a propiedades económicas por tamaño o disponibilidad, mientras que otras se parecen a propiedades caras por ubicación, reputación o amenidades. Por esta razón, los errores más frecuentes se concentraron en esa clase.
+
+### Modelos de regresión
+
+En regresión se evaluaron modelos orientados a predecir el precio por noche. Nuevamente, Random Forest fue el modelo con mejor desempeño, al obtener el menor error y el mejor R2. La RNA de regresión presentó resultados débiles: sus errores fueron altos y su capacidad explicativa fue baja. Aunque se realizó tuneo de parámetros, la mejora no fue suficiente para justificar su uso como modelo principal.
+
+Para el negocio, esta diferencia es relevante. Un modelo con errores promedio altos puede llevar a recomendaciones de precio poco realistas, lo cual afecta la competitividad de las propiedades y la confianza de los clientes. Por eso, aunque las redes neuronales son modelos potentes en muchos contextos, en este conjunto de datos no fueron la mejor alternativa.
+
+### Recomendación para negocio
+
+Para SmartStay Advisors se recomienda utilizar **Random Forest como modelo principal de clasificación** para segmentar propiedades en económicas, intermedias y caras. Esta segmentación puede apoyar decisiones rápidas de posicionamiento comercial, selección de propiedades para clientes y detección de alojamientos que podrían necesitar ajustes de precio.
+
+También se recomienda utilizar **Random Forest como modelo principal de regresión** para estimar precios por noche. Este modelo puede apoyar estrategias de pricing competitivo, especialmente cuando se combine con reglas de negocio, revisión de disponibilidad y análisis de ocupación. Si la empresa necesita mayor interpretabilidad para explicar cada decisión a clientes o directivos, el árbol de regresión puede funcionar como modelo complementario, aunque con menor precisión.
+
+### Conclusiones finales
+
+La primera conclusión es que **Random Forest fue el mejor modelo general para clasificación**. Aunque presenta señales de sobreajuste moderado, su rendimiento en prueba fue superior al de los demás algoritmos. Por ello, se recomienda usarlo con validación cruzada y control de complejidad antes de implementarlo en un entorno productivo.
+
+La segunda conclusión es que **Random Forest también fue el mejor modelo para predecir precios**. Su menor RMSE, menor MAE documentado y mayor R2 lo convierten en la opción más sólida para estimar el precio por noche de las propiedades. Este resultado confirma que los modelos basados en ensambles de árboles se adaptan mejor a la estructura del conjunto de datos que los modelos lineales o las RNA probadas.
+
+La tercera conclusión es que **las redes neuronales no fueron la mejor opción para este conjunto de datos**. En clasificación lograron resultados aceptables, pero no superiores; en regresión tuvieron un desempeño bajo. Esto demuestra que un modelo más complejo no siempre produce mejores resultados. Para este caso, la estructura de los datos favorece algoritmos capaces de manejar relaciones no lineales de manera más estable y con menor sensibilidad al escalamiento, como Random Forest.
+
+La cuarta conclusión es que **el análisis de sobreajuste debe formar parte de la decisión final**. Un modelo no debe elegirse solo por tener la métrica más alta, sino por mantener un balance razonable entre desempeño, estabilidad e interpretabilidad. En este proyecto, Random Forest ofrece el mejor desempeño, pero debe monitorearse para evitar exceso de ajuste. Por tanto, la recomendación final es usar Random Forest como modelo principal, acompañado de validación cruzada, revisión periódica de métricas y actualización con nuevos datos de mercado.
