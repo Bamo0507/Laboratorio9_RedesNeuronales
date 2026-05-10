@@ -444,11 +444,11 @@ kable(
 )
 ```
 
-El rendimiento de ambos modelos es bastante negativo. Al revisar el Modelo 1, nos vamos a dar cuenta de que el RMSE en entrenamiento fue de 12,818 y en prueba fue de 11,013. No hay una diferencia considerable entre las métricas de entrenamiento y prueba, pero sí son resultados malos. Por ejemplo, el MAE en entrenamiento fue de 4,970 y en prueba fue de 5,025, lo cual quiere decir que estamos estimando el precio de las propiedades con un error de más de 5,000, lo cual no es bueno para ningún negocio y especialmente para SmartStay, cuyo objetivo es trabajar con modelos que puedan darles precios adecuados para las propiedades. Una persona que mire que una noche en un Airbnb está sobrevalorada por más de 5,000 lo lógico es que no quiera considerar esa propiedad.
+El rendimiento de ambos modelos es bastante negativo. Al revisar el Modelo 1, nos vamos a dar cuenta de que el RMSE en entrenamiento fue de 12,818 y en prueba fue de 11,013. No hay una diferencia considerable entre las métricas de entrenamiento y prueba, pero sí son resultados malos. Por ejemplo, el MAE en entrenamiento fue de 4,970 y en prueba fue de 5,025, lo cual quiere decir que estamos estimando el precio de las propiedades con un error de más de 5,000 dólares USD, lo cual no es bueno para ningún negocio y especialmente para SmartStay, cuyo objetivo es trabajar con modelos que puedan darles precios adecuados para las propiedades. Una persona que mire que una noche en un Airbnb está sobrevalorada por más de 5,000 lo lógico es que no quiera considerar esa propiedad.
 
 En cuanto al R2, este dio un valor negativo tanto en entrenamiento como en prueba, lo cual es alarmante porque quiere decir que el modelo es peor que predecir la media del precio para todas las propiedades, es decir, no logra capturar ninguna tendencia útil en los datos.
 
-En cuanto al segundo modelo, en donde se trabajó con dos capas, una de 128 neuronas y la otra de 64, los resultados presentaron un comportamiento mixto. El RMSE en entrenamiento fue de 17,483 y en prueba fue de 15,486, valores peores que los del primer modelo. Sin embargo, el MAE mejoró: en entrenamiento el error promedio fue de 3,255 y en prueba de 3,169, una reducción respecto al Modelo 1. Esto indica que el Modelo 2 comete menos errores promedio, pero cuando se equivoca lo hace de forma más extrema, lo que eleva el RMSE. Aun así, un error promedio superior a $3,000 sigue siendo inaceptable para el propósito de la consultoría. El R2 muestra un comportamiento muy similar al del primer modelo: el valor en entrenamiento es de -50.97 y en prueba de -31.22, confirmando que tampoco logra superar la línea base de predicción por media.
+En cuanto al segundo modelo, en donde se trabajó con dos capas, una de 128 neuronas y la otra de 64, los resultados presentaron un comportamiento mixto. El RMSE en entrenamiento fue de 17,483 y en prueba fue de 15,486, valores peores que los del primer modelo. Sin embargo, el MAE mejoró: en entrenamiento el error promedio fue de 3,255 y en prueba de 3,169, una reducción respecto al Modelo 1. Esto indica que el Modelo 2 comete menos errores promedio, pero cuando se equivoca lo hace de forma más extrema, lo que eleva el RMSE. Aun así, un error promedio superior a 3,000 dólares USD sigue siendo inaceptable para el propósito de la consultoría. El R2 muestra un comportamiento muy similar al del primer modelo: el valor en entrenamiento es de -50.97 y en prueba de -31.22, confirmando que tampoco logra superar la línea base de predicción por media.
 
 
 ## Curvas de aprendizaje y generalización
@@ -808,42 +808,4 @@ En los modelos de regresión, Random Forest también presenta cierta diferencia 
 
 ## Informe consolidado para SmartStay Advisors
 
-### Síntesis ejecutiva
-
-SmartStay Advisors busca apoyar a clientes corporativos y particulares en la selección de propiedades de Airbnb, optimizando precio, calidad y disponibilidad. Además, la empresa tiene un incentivo estratégico adicional: aumentar la ocupación de propiedades con bajo desempeño. Para responder a este objetivo, durante la consultoría se evaluaron modelos de minería de datos capaces de segmentar propiedades por nivel de precio y de estimar el precio por noche a partir de las características disponibles en el conjunto de datos.
-
-El análisis general muestra que los modelos basados en árboles fueron los más adecuados para este problema. En particular, **Random Forest** fue el algoritmo con mejor desempeño tanto para clasificación como para regresión. Esto se debe a que puede capturar relaciones no lineales y combinaciones complejas entre variables, algo esperable en datos de Airbnb, donde el precio y la categoría de una propiedad dependen simultáneamente de múltiples factores como ubicación, disponibilidad, capacidad, reputación, reglas de estancia y comportamiento histórico.
-
-### Preparación y exploración de datos
-
-El conjunto de datos fue depurado eliminando variables identificadoras, enlaces, campos textuales extensos y columnas que no aportaban directamente al modelado o que podían introducir ruido. Luego, se transformó el precio a formato numérico y se conservaron las observaciones con precio disponible. Para mantener una comparación válida entre modelos, se usó la misma partición de entrenamiento y prueba durante las distintas entregas. Este punto es fundamental porque comparar algoritmos con particiones distintas puede producir conclusiones engañosas.
-
-También se construyó una variable categórica de precio con tres niveles: propiedades económicas, intermedias y caras. Esta segmentación permitió abordar el problema desde dos perspectivas: clasificación, para saber en qué categoría se ubica una propiedad, y regresión, para estimar directamente el precio por noche.
-
-### Modelos de clasificación
-
-En clasificación se evaluaron árboles de decisión, Random Forest, Naive Bayes, KNN, regresión logística, SVM y redes neuronales artificiales. Las RNA se probaron con diferentes topologías y funciones de activación. El mejor resultado de RNA fue competitivo frente a algunos modelos clásicos, pero no logró superar el desempeño de Random Forest.
-
-El mayor reto de clasificación estuvo en las propiedades intermedias. Esto tiene sentido porque las propiedades de precio medio suelen compartir características con los extremos: algunas se parecen a propiedades económicas por tamaño o disponibilidad, mientras que otras se parecen a propiedades caras por ubicación, reputación o amenidades. Por esta razón, los errores más frecuentes se concentraron en esa clase.
-
-### Modelos de regresión
-
-En regresión se evaluaron modelos orientados a predecir el precio por noche. Nuevamente, Random Forest fue el modelo con mejor desempeño, al obtener el menor error y el mejor R2. La RNA de regresión presentó resultados débiles: sus errores fueron altos y su capacidad explicativa fue baja. Aunque se realizó tuneo de parámetros, la mejora no fue suficiente para justificar su uso como modelo principal.
-
-Para el negocio, esta diferencia es relevante. Un modelo con errores promedio altos puede llevar a recomendaciones de precio poco realistas, lo cual afecta la competitividad de las propiedades y la confianza de los clientes. Por eso, aunque las redes neuronales son modelos potentes en muchos contextos, en este conjunto de datos no fueron la mejor alternativa.
-
-### Recomendación para negocio
-
-Para SmartStay Advisors se recomienda utilizar **Random Forest como modelo principal de clasificación** para segmentar propiedades en económicas, intermedias y caras. Esta segmentación puede apoyar decisiones rápidas de posicionamiento comercial, selección de propiedades para clientes y detección de alojamientos que podrían necesitar ajustes de precio.
-
-También se recomienda utilizar **Random Forest como modelo principal de regresión** para estimar precios por noche. Este modelo puede apoyar estrategias de pricing competitivo, especialmente cuando se combine con reglas de negocio, revisión de disponibilidad y análisis de ocupación. Si la empresa necesita mayor interpretabilidad para explicar cada decisión a clientes o directivos, el árbol de regresión puede funcionar como modelo complementario, aunque con menor precisión.
-
-### Conclusiones finales
-
-La primera conclusión es que **Random Forest fue el mejor modelo general para clasificación**. Aunque presenta señales de sobreajuste moderado, su rendimiento en prueba fue superior al de los demás algoritmos. Por ello, se recomienda usarlo con validación cruzada y control de complejidad antes de implementarlo en un entorno productivo.
-
-La segunda conclusión es que **Random Forest también fue el mejor modelo para predecir precios**. Su menor RMSE, menor MAE documentado y mayor R2 lo convierten en la opción más sólida para estimar el precio por noche de las propiedades. Este resultado confirma que los modelos basados en ensambles de árboles se adaptan mejor a la estructura del conjunto de datos que los modelos lineales o las RNA probadas.
-
-La tercera conclusión es que **las redes neuronales no fueron la mejor opción para este conjunto de datos**. En clasificación lograron resultados aceptables, pero no superiores; en regresión tuvieron un desempeño bajo. Esto demuestra que un modelo más complejo no siempre produce mejores resultados. Para este caso, la estructura de los datos favorece algoritmos capaces de manejar relaciones no lineales de manera más estable y con menor sensibilidad al escalamiento, como Random Forest.
-
-La cuarta conclusión es que **el análisis de sobreajuste debe formar parte de la decisión final**. Un modelo no debe elegirse solo por tener la métrica más alta, sino por mantener un balance razonable entre desempeño, estabilidad e interpretabilidad. En este proyecto, Random Forest ofrece el mejor desempeño, pero debe monitorearse para evitar exceso de ajuste. Por tanto, la recomendación final es usar Random Forest como modelo principal, acompañado de validación cruzada, revisión periódica de métricas y actualización con nuevos datos de mercado.
+El informe completo de la consultoría, que cubre todas las fases del proyecto desde el análisis exploratorio hasta los modelos de redes neuronales, se encuentra en el archivo `Informe9.Rmd`.

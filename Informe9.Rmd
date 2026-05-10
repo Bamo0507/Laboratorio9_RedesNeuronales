@@ -1,0 +1,145 @@
+---
+title: "Consultoría de Modelado Predictivo — Propiedades Airbnb"
+subtitle: "SmartStay Advisors"
+author: "Bryan Martínez, Adriana Palacios, y Nery Molina"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    latex_engine: xelatex
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+```
+
+SmartStay Advisors necesitaba herramientas que le permitieran segmentar propiedades de Airbnb por categoría de precio y estimar el precio por noche a partir de las características disponibles en el mercado. Para responder a esa necesidad, se evaluaron siete algoritmos de clasificación y seis de regresión sobre un conjunto de datos de aproximadamente 10,000 listados de Airbnb.
+
+El hallazgo principal es que **Random Forest fue el modelo con mejor desempeño en ambas tareas**. En clasificación alcanzó una exactitud de 0.6420 sobre el conjunto de prueba, y en regresión obtuvo un RMSE de 1,272.99 dólares USD y un R2 de 0.7823. Las redes neuronales artificiales, evaluadas en la última fase del proyecto, no lograron superar a los modelos basados en árboles: en clasificación obtuvieron resultados competitivos pero no superiores, y en regresión presentaron un desempeño significativamente inferior al resto de los algoritmos.
+
+La recomendación final es usar **Random Forest como modelo principal** para ambas tareas, acompañado de validación cruzada y actualización periódica del modelo con datos nuevos de mercado.
+
+---
+
+## Contexto y objetivos de la consultoría
+
+SmartStay Advisors es una empresa de consultoría especializada en el mercado de hospedaje a corto plazo. Su propósito es apoyar a propietarios y clientes corporativos en decisiones relacionadas con selección de propiedades, estrategia de precios y optimización de ocupación. Para cumplir ese propósito de forma escalable, la empresa requiere modelos automáticos que analicen los datos disponibles del mercado y generen recomendaciones sustentadas en evidencia.
+
+El proyecto se estructuró en torno a dos objetivos concretos. El primero es la **segmentación de propiedades por categoría de precio**: distinguir entre alojamientos económicos, intermedios y caros para facilitar la selección de propiedades según el perfil de cada cliente. El segundo es la **estimación del precio por noche**: determinar un precio competitivo para una propiedad a partir de sus características, con el fin de apoyar decisiones de posicionamiento comercial y negociación con propietarios.
+
+Ambos objetivos responden a una realidad concreta del mercado: en un ecosistema como Airbnb, donde los precios varían por ubicación, capacidad, temporada, reputación y disponibilidad, un sistema automático reduce el tiempo de análisis y disminuye el margen de error frente a la evaluación manual.
+
+---
+
+## Datos utilizados y preprocesamiento
+
+El conjunto de datos contiene listados de Airbnb con aproximadamente 10,000 registros y 80 variables originales. La variable objetivo es el precio por noche, almacenada originalmente como texto y convertida a formato numérico al inicio del análisis.
+
+Se eliminaron variables que no aportaban valor predictivo: identificadores internos, URLs, campos de texto libre, metadatos del proceso de scraping, fechas en formato crudo y columnas redundantes o derivadas. También se eliminó la variable de ingresos estimados porque se deriva directamente del precio y su inclusión generaría filtración de información hacia el modelo.
+
+Las variables predictoras utilizadas incluyen características operativas de la propiedad (habitaciones, camas, baños, capacidad), información del anfitrión (número de listados activos), disponibilidad y ocupación histórica, puntuaciones de reseñas y ubicación geográfica (coordenadas y vecindario normalizado).
+
+Para garantizar que todos los algoritmos evaluados fueran comparables entre sí, se utilizó una **partición fija de 70% para entrenamiento y 30% para prueba**, con semilla 42, mantenida idéntica a lo largo de todo el proyecto. Los modelos de redes neuronales requirieron un paso adicional de normalización min-max sobre las variables numéricas, transformando todos los valores al rango [0, 1] usando únicamente los parámetros del conjunto de entrenamiento para evitar filtración de información hacia el conjunto de prueba.
+
+La variable categórica de precio se construyó usando los percentiles 33 y 67 del conjunto de entrenamiento, definiendo tres segmentos: **Economica** (precio en el tercio inferior), **Intermedia** (tercio medio) y **Cara** (tercio superior). Esta misma variable se mantuvo constante para todos los modelos de clasificación.
+
+---
+
+## Análisis exploratorio de datos
+
+El análisis exploratorio reveló que la distribución del precio por noche es marcadamente asimétrica hacia la derecha. La mayoría de los listados se concentra en rangos de precio bajos y medios, con una cola extensa de propiedades con precios elevados. Esta asimetría, asociada a la presencia de alojamientos de lujo, tiene implicaciones directas para los modelos de regresión: métricas como el RMSE, que penaliza con más fuerza los errores grandes, tienden a verse afectadas por estas observaciones extremas.
+
+Entre las variables con mayor relación con el precio se identificaron la capacidad de la propiedad, el número de habitaciones y camas, y la puntuación de ubicación en las reseñas. El tipo de alojamiento también fue un factor determinante: las propiedades del tipo "Entire home" presentaron precios promedio considerablemente superiores a los de habitaciones privadas o compartidas. La ubicación geográfica, medida tanto por coordenadas como por vecindario normalizado, mostró variaciones importantes en el precio promedio entre zonas.
+
+Se detectaron señales de multicolinealidad entre variables relacionadas con el tamaño de la propiedad (habitaciones, camas, capacidad). Esto fue especialmente relevante para la regresión lineal, donde la colinealidad puede afectar la estabilidad de los coeficientes estimados.
+
+---
+
+## Modelos de clasificación
+
+Para la clasificación de propiedades en segmentos de precio se evaluaron siete algoritmos. En todos los casos la métrica principal de selección fue el accuracy en el conjunto de prueba, complementado con el análisis de las matrices de confusión y la diferencia entre entrenamiento y prueba.
+
+```{r tabla-clasificacion}
+tabla_clf <- data.frame(
+  Algoritmo = c("Random Forest", "SVM (kernel RBF)", "Árbol de decisión",
+                "RNA (64 neuronas, logística)", "Regresión logística",
+                "KNN", "Naive Bayes"),
+  Accuracy_Test = c(0.6420, 0.5860, 0.5820, 0.5721, 0.5580, 0.5370, 0.4490)
+)
+kable(tabla_clf, caption = "Comparación de modelos de clasificación — accuracy en conjunto de prueba",
+      col.names = c("Algoritmo", "Accuracy (prueba)"))
+```
+
+Random Forest obtuvo el mayor accuracy de prueba con 0.6420, lo que representa una mejora de más de 30 puntos porcentuales frente a una clasificación aleatoria (que alcanzaría 33.33% en tres clases balanceadas). Su ventaja frente a los demás algoritmos se explica porque combina múltiples árboles de decisión entrenados de forma independiente, capturando combinaciones complejas entre variables sin imponer supuestos de linealidad.
+
+El reto principal de esta tarea fue la **categoría intermedia**. Todos los modelos evaluados registraron su mayor cantidad de errores en ese segmento, y el patrón se repitió de forma consistente: propiedades intermedias fueron clasificadas como económicas o como caras porque su perfil de características las hace parecerse tanto a un extremo como al otro. Esto sugiere que la frontera entre las tres categorías no está claramente definida por las variables disponibles en el dataset, y que la clase intermedia requeriría variables adicionales (como ubicación más granular, amenidades específicas o demanda histórica) para separarse con mayor precisión.
+
+Naive Bayes obtuvo el peor resultado con un accuracy de 0.4490, incluso inferior al nivel aleatorio. Esto se explica porque el algoritmo asume independencia entre variables, supuesto que no se cumple en este dataset donde el tamaño, la ubicación y el tipo de propiedad están correlacionados entre sí.
+
+Las redes neuronales alcanzaron un accuracy de 0.5721, resultado competitivo frente a varios modelos clásicos pero insuficiente para superar a Random Forest. Su principal limitación fue la dificultad para clasificar la categoría intermedia, un problema que comparten con todos los demás algoritmos.
+
+---
+
+## Modelos de regresión
+
+Para la estimación del precio por noche se evaluaron seis algoritmos. Las métricas principales fueron el RMSE (que penaliza más fuertemente los errores grandes) y el R2 (que mide qué proporción de la varianza del precio logra explicar el modelo).
+
+```{r tabla-regresion}
+tabla_reg <- data.frame(
+  Algoritmo = c("Random Forest", "Árbol de regresión", "KNN regresión",
+                "Regresión lineal", "Naive Bayes", "RNA (64 neuronas, tuneada)"),
+  RMSE_Test = c("1,272.99", "1,554.16", "2,565.00",
+                "2,580.00", "2,805.00", "15,746.12"),
+  MAE_Test  = c("179.00", "246.00", "309.00",
+                "No calculado", "No calculado", "3,070.84"),
+  R2_Test   = c("0.7823", "0.6755", "0.1156",
+                "0.1053", "-0.0600", "-32.3124")
+)
+kable(tabla_reg,
+      caption = "Comparación de modelos de regresión — métricas en conjunto de prueba",
+      col.names = c("Algoritmo", "RMSE (dólares USD)", "MAE (dólares USD)", "R2"))
+```
+
+Random Forest fue el mejor modelo en regresión con un RMSE de 1,272.99 dólares USD, un MAE de 179 dólares USD y un R2 de 0.7823. Esto significa que, en promedio, el modelo estima el precio de una propiedad con un error de 179 dólares USD por noche, y que logra explicar el 78.23% de la variación de los precios usando las variables disponibles. Estos resultados lo convierten en el algoritmo más útil para apoyar decisiones de pricing en SmartStay Advisors.
+
+El árbol de regresión se posicionó como la segunda mejor opción con un RMSE de 1,554.16 y un R2 de 0.6755. Aunque su precisión es menor que la del Random Forest, tiene la ventaja de ser interpretable: sus reglas de decisión pueden comunicarse directamente a propietarios o clientes para explicar por qué una propiedad fue valorada en determinado rango.
+
+Las redes neuronales artificiales presentaron los peores resultados en esta tarea. El modelo tuneado alcanzó un RMSE de 15,746.12 dólares USD y un R2 de -32.31, lo que indica que predijo peor que simplemente usar la media del precio para todas las propiedades. Esta dificultad se explica en parte por las restricciones computacionales que limitaron el entrenamiento a muestras de 500 a 1,500 observaciones, muy por debajo de lo que una red neuronal necesita para aprender patrones generalizables sobre un dataset con esta estructura y variabilidad.
+
+---
+
+## Análisis de generalización
+
+La selección del modelo final no se basó únicamente en las métricas de prueba. También se consideró la diferencia entre el rendimiento en entrenamiento y en prueba, porque un modelo que generaliza mal no puede utilizarse de forma confiable con propiedades que no formaron parte del conjunto de entrenamiento.
+
+Random Forest mostró señales de sobreajuste moderado en ambas tareas. En clasificación, su accuracy en entrenamiento fue notablemente superior al de prueba; en regresión, su RMSE de entrenamiento fue considerablemente menor al de prueba. Esto es esperable en modelos de ensamble sin restricciones de profundidad. Sin embargo, su rendimiento en prueba siguió siendo el mejor entre todos los algoritmos, lo que confirma que el sobreajuste no compromete su utilidad práctica.
+
+Para llevar este modelo a producción, se recomienda aplicar validación cruzada con al menos cinco folds y establecer límites en la profundidad máxima de los árboles y en el número mínimo de observaciones por hoja. Estas medidas reducen el exceso de ajuste sin sacrificar precisión en los datos de prueba.
+
+Las redes neuronales de clasificación no mostraron sobreajuste: la diferencia entre entrenamiento y prueba fue mínima (menos de 0.01 en accuracy). Sin embargo, su problema fue distinto: bajo desempeño en ambos conjuntos, lo que indica que el modelo no logró aprender una representación útil de los datos con la configuración y el volumen de entrenamiento utilizados.
+
+---
+
+## Recomendaciones para SmartStay Advisors
+
+**Para la segmentación de propiedades** se recomienda usar Random Forest como modelo principal. Con un accuracy de 0.6420, este clasificador supera al resto de los algoritmos evaluados y puede integrarse directamente en el flujo de trabajo de la empresa para asignar automáticamente una categoría de precio a cada listado nuevo. Antes de implementarlo en producción, se sugiere aplicar validación cruzada con el conjunto completo de datos y explorar si la incorporación de variables adicionales (como amenidades específicas o proximidad a puntos de interés) puede mejorar la separación de la categoría intermedia.
+
+**Para la estimación de precios** también se recomienda Random Forest. Su MAE de 179 dólares USD representa un nivel de error razonable para apoyar decisiones de pricing competitivo. Es importante comunicar a los clientes que el modelo tiene un margen de error esperado, especialmente en propiedades con precios extremos, donde la variabilidad del mercado es mayor y los errores del modelo tienden a ser más grandes.
+
+Si la empresa necesita mayor interpretabilidad para justificar una recomendación de precio ante un propietario o directivo, el árbol de regresión puede funcionar como modelo complementario. Su estructura de reglas permite explicar de forma directa por qué una propiedad fue valorada en determinado rango, aunque con menor precisión que el Random Forest.
+
+**Las redes neuronales artificiales no se recomiendan** para este conjunto de datos en su configuración actual. Para explorar su potencial en el futuro, sería necesario contar con un volumen de datos considerablemente mayor, capacidad computacional para entrenar sobre el conjunto completo sin necesidad de muestras reducidas, y una búsqueda más extensa de hiperparámetros que incluya técnicas de regularización como dropout y early stopping.
+
+---
+
+## Conclusiones
+
+La primera conclusión es que **los modelos basados en árboles dominaron este proyecto en ambas tareas**. Random Forest fue el mejor clasificador y el mejor regresor, y el árbol de decisión se posicionó como la segunda opción más sólida en regresión. La razón es estructural: el precio de una propiedad en Airbnb depende de combinaciones no lineales entre múltiples variables (ubicación, capacidad, disponibilidad, reputación y tipo de alojamiento), y los algoritmos basados en árboles son precisamente los que mejor capturan ese tipo de relaciones sin imponer supuestos restrictivos sobre la forma de la función.
+
+La segunda conclusión es que **la categoría intermedia de precio representa el principal desafío de clasificación**. Ninguno de los siete modelos evaluados logró clasificar esta categoría con alta precisión, porque las propiedades de precio medio no tienen un perfil claramente diferenciado en las variables disponibles. Este resultado debe considerarse al comunicar estimaciones de segmentación a los clientes: la incertidumbre es mayor en la categoría intermedia que en los extremos.
+
+La tercera conclusión es que **las redes neuronales no fueron una alternativa competitiva para este dataset**. En clasificación obtuvieron resultados aceptables pero no superiores a Random Forest; en regresión presentaron el peor desempeño entre todos los modelos evaluados. Esto demuestra que mayor complejidad del modelo no equivale a mejor rendimiento. Para este problema, la estructura del dataset favorece a los modelos de ensamble sobre las redes neuronales, al menos con el volumen de datos y la capacidad computacional disponibles.
+
+La cuarta conclusión es que **el análisis de sobreajuste debe ser un criterio permanente de selección y monitoreo**. Un modelo que funciona bien en entrenamiento puede fallar con datos nuevos. En un mercado tan dinámico como Airbnb, donde los precios, la oferta y las preferencias de los viajeros cambian con regularidad, un modelo entrenado hoy puede perder precisión en meses. Por eso, además de seleccionar el mejor modelo actual, se recomienda establecer un proceso de actualización periódica que incluya reentrenamiento con datos recientes y verificación de las métricas de generalización antes de cada nueva temporada de alta demanda.
