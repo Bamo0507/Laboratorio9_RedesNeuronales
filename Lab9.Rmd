@@ -16,7 +16,11 @@ library(neuralnet)
 library(caret)
 library(knitr)
 
-# PREPROCESAMIENTO ESTÁNDAR
+## Repositorio
+
+https://github.com/Bamo0507/Laboratorio9_RedesNeuronales
+
+# Pre-procesamiento
 vars_eliminar <- c(
   "id", "listing_url", "scrape_id", "picture_url",
   "host_id", "host_url", "host_thumbnail_url", "host_picture_url",
